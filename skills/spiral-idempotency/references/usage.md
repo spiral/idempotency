@@ -30,9 +30,9 @@ use Spiral\Idempotency\Attribute\Idempotent;
 
 - `storage` — alias from config; the only infrastructure reference in business code.
 - `key` — dot-path over the **call arguments**, walked by `ArgumentKeyResolver`; the leaf may be a
-  scalar, a `Stringable` (UUID/ULID value objects) or a backed enum. `null` lets the transport
+  non-boolean scalar, a `Stringable` (UUID/ULID value objects) or a backed enum. `null` lets the transport
   middleware supply it (HTTP header/field, job header, gRPC metadata). A path resolving to nothing —
-  or to a value with no string form (array, plain object, null) — fails fast.
+  or to a value with no string form (array, plain object, null, bool) — fails fast.
 - `lockTtl` / `ttl` — per-operation overrides (lockTtl: lease driver only; the inbox ignores it —
   its mutual exclusion is the row lock of the in-progress INSERT, not a time-bound lease).
 - `scope` — key namespace: `null` (default) = per-operation `Class::method` isolation, where the

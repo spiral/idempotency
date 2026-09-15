@@ -9,9 +9,10 @@ use Spiral\Idempotency\ArgumentKeyResolver;
 /**
  * Default extractor: walks the path over array keys and object properties, then converts the leaf.
  *
- * Accepted leaves are scalars, {@see \Stringable} (domain ids such as UUID/ULID wrappers) and
- * {@see \BackedEnum} (its backing value). Anything else — an array, a plain object, null — yields null,
- * so the caller can report a misconfigured path instead of deduplicating on `"Array"` or `""`.
+ * Accepted leaves are non-boolean scalars, {@see \Stringable} (domain ids such as UUID/ULID wrappers)
+ * and {@see \BackedEnum} (its backing value). Anything else — an array, a plain object, null, a bool —
+ * yields null, so the caller can report a misconfigured path instead of deduplicating on `"Array"`
+ * or `""`.
  *
  * @internal Bound to {@see ArgumentKeyResolver} by the bootloader; not part of the public API.
  */
@@ -42,6 +43,8 @@ final class DefaultArgumentKeyResolver implements ArgumentKeyResolver
 
         return match (true) {
             $cursor instanceof \BackedEnum => (string) $cursor->value,
+            // Before the scalar arm: a bool would cast to '1'/'' — a key that is meaningless either way.
+            \is_bool($cursor) => null,
             \is_scalar($cursor), $cursor instanceof \Stringable => (string) $cursor,
             default => null,
         };

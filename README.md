@@ -291,7 +291,7 @@ snapshotted: they stay exceptions so the key is released and a retry re-runs.
 | Parameter | Meaning                                                                                                                                                          |
 |-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `storage` | Semantic alias from the config — the only infrastructure reference in business code                                                                              |
-| `key`     | Dot-notation path over the **call arguments**, resolved by `ArgumentKeyResolver`: the leaf may be a scalar, a `Stringable` (domain id) or a backed enum. `null` lets a transport middleware supply the key (HTTP header/field). A path that resolves to nothing fails fast |
+| `key`     | Dot-notation path over the **call arguments**, resolved by `ArgumentKeyResolver`: the leaf may be a non-boolean scalar, a `Stringable` (domain id) or a backed enum. `null` lets a transport middleware supply the key (HTTP header/field). A path that resolves to nothing fails fast |
 | `lockTtl` | Override of the PROCESSING lock TTL, seconds (lease driver only)                                                                                                 |
 | `ttl`     | Override of the completed-record retention TTL, seconds                                                                                                          |
 | `scope`   | Key namespace, see below                                                                                                                                         |
