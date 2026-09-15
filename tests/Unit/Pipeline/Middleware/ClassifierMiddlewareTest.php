@@ -4,16 +4,16 @@ declare(strict_types=1);
 
 namespace Spiral\Idempotency\Tests\Unit\Pipeline\Middleware;
 
-use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Exception\ClassifiedException;
 use Spiral\Idempotency\Exception\IdempotencyException;
-use Spiral\Idempotency\IdempotencyContext;
+use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Internal\Pipeline\DefaultFailureClassifier;
 use Spiral\Idempotency\Pipeline\ExecutionCall;
 use Spiral\Idempotency\Pipeline\ExecutionMiddleware;
 use Spiral\Idempotency\Pipeline\FailureKind;
 use Spiral\Idempotency\Pipeline\Middleware\ClassifierMiddleware;
 use Spiral\Idempotency\Pipeline\Pipeline;
+use Spiral\Idempotency\Tests\Unit\Stub\StubIdempotencyContext;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Test;
@@ -113,14 +113,7 @@ final class ClassifierMiddlewareTest
     private function call(): ExecutionCall
     {
         return new ExecutionCall(
-            context: new class implements IdempotencyContext {
-                public function getKey(): string
-                {
-                    return 'k';
-                }
-
-                public function renew(bool $force = false): void {}
-            },
+            context: new StubIdempotencyContext(),
             operation: static fn(): null => null,
             options: new ExecuteOptions(),
         );

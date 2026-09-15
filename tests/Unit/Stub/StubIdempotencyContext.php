@@ -15,7 +15,7 @@ final readonly class StubIdempotencyContext implements IdempotencyContext
     /**
      * @param non-empty-string $key
      */
-    public function __construct(private string $key) {}
+    public function __construct(private string $key = 'k') {}
 
     #[\Override]
     public function getKey(): string
