@@ -5,13 +5,22 @@ declare(strict_types=1);
 namespace Spiral\Idempotency\Attribute;
 
 /**
- * Marks a handler as idempotent. The method carries a *semantic storage alias*; the
+ * Marks a handler as idempotent. The target carries a *semantic storage alias*; the
  * concrete driver and the declared guarantee live in config — infra never leaks into
  * business code.
  *
+ * Placed on a method it covers that method; placed on a class it covers *every* method the transport
+ * dispatches to on that class — including one inherited from an abstract base (a `JobHandler::handle()`
+ * that forwards to the subclass), which is the only way to annotate a handler that never redeclares the
+ * entry point. On a job handler that is the single entry point; on a controller it makes every action
+ * idempotent under one storage alias.
+ *
+ * A method attribute wins over a class one, and the nearest class in the inheritance chain wins over
+ * its parents.
+ *
  * @api
  */
-#[\Attribute(\Attribute::TARGET_METHOD)]
+#[\Attribute(\Attribute::TARGET_CLASS | \Attribute::TARGET_METHOD)]
 final readonly class Idempotent
 {
     /**

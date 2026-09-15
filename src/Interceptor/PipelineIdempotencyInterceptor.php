@@ -20,6 +20,7 @@ use Spiral\Idempotency\Pipeline\IdempotencyCall;
 use Spiral\Idempotency\Pipeline\Pipeline;
 use Spiral\Idempotency\Pipeline\ResolutionMiddleware;
 use Spiral\Interceptors\Context\CallContextInterface;
+use Spiral\Interceptors\Context\TargetInterface;
 use Spiral\Interceptors\HandlerInterface;
 
 /**
@@ -52,8 +53,10 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
     private ?Pipeline $pipeline = null;
 
     /**
-     * Reflected attributes memoised by operation identity (`Class::method`), avoiding a reflection scan
-     * per call. Only method targets are keyed; other targets (closures) are looked up each time.
+     * Reflected attributes memoised by operation identity, avoiding a reflection scan per call. Keyed by
+     * the *concrete* `Class::method` — the lookup walks the class hierarchy, so two subclasses sharing
+     * one inherited method resolve to different attributes and must not share an entry. Only method
+     * targets are keyed; other targets (closures) are looked up each time.
      *
      * @var array<string, Idempotent|null>
      */
@@ -72,7 +75,7 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
 
     public function intercept(CallContextInterface $context, HandlerInterface $handler): mixed
     {
-        $attribute = $this->attribute($context->getTarget()->getReflection());
+        $attribute = $this->attribute($context->getTarget());
 
         if ($attribute === null) {
             return $handler->handle($context);
@@ -185,8 +188,9 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
     }
 
     /**
-     * Operation identity used as the default key scope: `Class::method` from the target's reflection,
-     * falling back to the target's string form when reflection is not a method (e.g. a closure target).
+     * Operation identity used as the default key scope: `Class::method` of the concrete target, falling
+     * back to the target's string form when reflection is not a method (e.g. a closure target). Sibling
+     * subclasses sharing one inherited entry point therefore get one key space each.
      *
      * @return non-empty-string
      */
@@ -195,7 +199,7 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
         $target = $context->getTarget();
         $reflection = $target->getReflection();
         if ($reflection instanceof \ReflectionMethod) {
-            return $reflection->getDeclaringClass()->getName() . '::' . $reflection->getName();
+            return $this->operationId($target, $reflection);
         }
 
         $id = (string) $target;
@@ -203,29 +207,35 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
         return $id === '' ? 'unknown' : $id;
     }
 
-    private function attribute(?\ReflectionFunctionAbstract $reflection): ?Idempotent
+    /**
+     * Resolve the attribute for a target: the method first, then the class hierarchy of the concrete
+     * target from the most derived class up. A method attribute wins over a class one, a subclass over
+     * its parents.
+     *
+     * @param TargetInterface<object|null> $target
+     */
+    private function attribute(TargetInterface $target): ?Idempotent
     {
+        $reflection = $target->getReflection();
         if ($reflection === null) {
             return null;
         }
 
         // Cache by operation identity for method targets (the common case); non-method targets
         // (e.g. closures) have no stable key, so they resolve the attribute afresh each time.
-        $cacheKey = $reflection instanceof \ReflectionMethod
-            ? $reflection->getDeclaringClass()->name . '::' . $reflection->getName()
-            : null;
+        $cacheKey = $reflection instanceof \ReflectionMethod ? $this->operationId($target, $reflection) : null;
 
         if ($cacheKey !== null && \array_key_exists($cacheKey, $this->attributes)) {
             return $this->attributes[$cacheKey];
         }
 
-        $resolved = null;
-        foreach ($reflection->getAttributes(Idempotent::class, \ReflectionAttribute::IS_INSTANCEOF) as $attribute) {
-            $instance = $attribute->newInstance();
-            \assert($instance instanceof Idempotent);
+        $resolved = $this->fromReflection($reflection);
 
-            $resolved = $instance;
-            break;
+        if ($resolved === null && $reflection instanceof \ReflectionMethod) {
+            $class = new \ReflectionClass($this->concreteClass($target) ?? $reflection->getDeclaringClass()->name);
+            do {
+                $resolved = $this->fromReflection($class);
+            } while ($resolved === null && ($class = $class->getParentClass()) !== false);
         }
 
         if ($cacheKey !== null) {
@@ -233,6 +243,50 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
         }
 
         return $resolved;
+    }
+
+    /**
+     * @param \ReflectionClass<object>|\ReflectionFunctionAbstract $reflection
+     */
+    private function fromReflection(\ReflectionClass|\ReflectionFunctionAbstract $reflection): ?Idempotent
+    {
+        foreach ($reflection->getAttributes(Idempotent::class, \ReflectionAttribute::IS_INSTANCEOF) as $attribute) {
+            $instance = $attribute->newInstance();
+            \assert($instance instanceof Idempotent);
+
+            return $instance;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param TargetInterface<object|null> $target
+     * @return non-empty-string
+     */
+    private function operationId(TargetInterface $target, \ReflectionMethod $reflection): string
+    {
+        return ($this->concreteClass($target) ?? $reflection->getDeclaringClass()->name) . '::' . $reflection->getName();
+    }
+
+    /**
+     * The class the target was built from, which {@see \ReflectionMethod::getDeclaringClass()} does not
+     * give for an inherited method: the bound object if the target carries one, else the first path
+     * segment when it names a real class.
+     *
+     * @param TargetInterface<object|null> $target
+     * @return class-string|null
+     */
+    private function concreteClass(TargetInterface $target): ?string
+    {
+        $object = $target->getObject();
+        if ($object !== null) {
+            return $object::class;
+        }
+
+        $candidate = $target->getPath()[0] ?? null;
+
+        return \is_string($candidate) && $candidate !== '' && \class_exists($candidate) ? $candidate : null;
     }
 
     /**
