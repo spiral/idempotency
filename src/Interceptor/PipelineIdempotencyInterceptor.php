@@ -8,6 +8,7 @@ use Psr\Container\ContainerInterface;
 use Spiral\Core\Container;
 use Spiral\Core\ContainerScope;
 use Spiral\Core\Scope;
+use Spiral\Idempotency\ArgumentKeyResolver;
 use Spiral\Idempotency\Attribute\Idempotent;
 use Spiral\Idempotency\Config\IdempotencyConfig;
 use Spiral\Idempotency\Exception\MisconfigurationException;
@@ -68,6 +69,7 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
     public function __construct(
         private readonly IdempotencyRegistry $registry,
         private readonly KeyResolver $keys,
+        private readonly ArgumentKeyResolver $arguments,
         private readonly ContainerInterface $container,
         private readonly IdempotencyConfig $config,
         private readonly string $transport,
@@ -133,8 +135,8 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
      * Resolve the key from the attribute's arg-path (dot-notation over the call arguments). A null result
      * is returned only for `key: null` — letting a transport middleware extract the key instead. An
      * explicit `key` path is a contract ("the key is here"): failing to resolve it is a misconfiguration
-     * (typo in the path, or a non-scalar value), so we fail fast rather than silently falling back to the
-     * transport and deduplicating on a different basis than the author intended.
+     * (typo in the path, or a value with no string form), so we fail fast rather than silently falling
+     * back to the transport and deduplicating on a different basis than the author intended.
      *
      * @param non-empty-string|null $scope operation-identity namespace mixed in as the resolver's parent key
      * @return non-empty-string|null
@@ -146,7 +148,7 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
             return null;
         }
 
-        $raw = $this->dotGet($context->getArguments(), $attribute->key);
+        $raw = $this->arguments->resolve($context->getArguments(), $attribute->key);
 
         return $raw !== null ? $this->keys->resolve($raw, $scope) : throw new MisconfigurationException(
             \sprintf(
@@ -155,9 +157,9 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
                 (string) $context->getTarget(),
                 \implode(', ', \array_keys($context->getArguments())) ?: '(none)',
             ),
-            'Point the `key` arg-path of #[Idempotent] at an existing scalar argument (dot-notation '
-            . 'over the call arguments), or set `key: null` to let a transport middleware supply the '
-            . 'key (e.g. the Idempotency-Key header).',
+            'Point the `key` arg-path of #[Idempotent] at an existing argument that has a string form '
+            . '(scalar, Stringable or backed enum; dot-notation over the call arguments), or set '
+            . '`key: null` to let a transport middleware supply the key (e.g. the Idempotency-Key header).',
         );
     }
 
@@ -287,31 +289,5 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
         $candidate = $target->getPath()[0] ?? null;
 
         return \is_string($candidate) && $candidate !== '' && \class_exists($candidate) ? $candidate : null;
-    }
-
-    /**
-     * @param array<array-key, mixed> $data
-     * @param string $path dot-notation path
-     */
-    private function dotGet(array $data, string $path): ?string
-    {
-        if ($path === '') {
-            return null;
-        }
-
-        $cursor = $data;
-        foreach (\explode('.', $path) as $segment) {
-            if (\is_array($cursor) && \array_key_exists($segment, $cursor)) {
-                $cursor = $cursor[$segment];
-                continue;
-            }
-            if (\is_object($cursor) && isset($cursor->{$segment})) {
-                $cursor = $cursor->{$segment};
-                continue;
-            }
-            return null;
-        }
-
-        return \is_scalar($cursor) ? (string) $cursor : null;
     }
 }

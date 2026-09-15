@@ -291,7 +291,7 @@ snapshotted: they stay exceptions so the key is released and a retry re-runs.
 | Parameter | Meaning                                                                                                                                                          |
 |-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `storage` | Semantic alias from the config — the only infrastructure reference in business code                                                                              |
-| `key`     | Dot-notation path over the **call arguments**; `null` lets a transport middleware supply the key (HTTP header/field). A path that resolves to nothing fails fast |
+| `key`     | Dot-notation path over the **call arguments**, resolved by `ArgumentKeyResolver`: the leaf may be a scalar, a `Stringable` (domain id) or a backed enum. `null` lets a transport middleware supply the key (HTTP header/field). A path that resolves to nothing fails fast |
 | `lockTtl` | Override of the PROCESSING lock TTL, seconds (lease driver only)                                                                                                 |
 | `ttl`     | Override of the completed-record retention TTL, seconds                                                                                                          |
 | `scope`   | Key namespace, see below                                                                                                                                         |
@@ -458,7 +458,8 @@ Three ways to keep the replay identical to the first attempt, best first:
 - **Domain failure rendering** — bind `DomainFailureRenderer` to turn thrown domain failures
   into cached HTTP responses, so a replay reproduces the same status (see above).
 - **Key policy** — bind `KeyResolver` to change normalization, hashing and hierarchy
-  composition.
+  composition, or `ArgumentKeyResolver` to change how the attribute's `key` path is walked
+  and which leaf types have a string form.
 - **Schema** — role names of the generated ORM tables are customizable via
   `SchemaNaming`; table names live in the storage configs.
 

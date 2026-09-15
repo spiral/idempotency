@@ -8,6 +8,7 @@ use Psr\Container\ContainerInterface;
 use Spiral\Boot\Bootloader\Bootloader;
 use Spiral\Core\BinderInterface;
 use Spiral\Core\Config\Proxy;
+use Spiral\Idempotency\ArgumentKeyResolver;
 use Spiral\Idempotency\Config\IdempotencyConfig;
 use Spiral\Idempotency\Exception\MisconfigurationException;
 use Spiral\Idempotency\IdempotencyRegistry;
@@ -91,11 +92,13 @@ final class GrpcIdempotencyBootloader extends Bootloader
             static fn(
                 IdempotencyRegistry $registry,
                 KeyResolver $keys,
+                ArgumentKeyResolver $arguments,
                 ContainerInterface $container,
                 IdempotencyConfig $config,
             ): PipelineIdempotencyInterceptor => new PipelineIdempotencyInterceptor(
                 $registry,
                 $keys,
+                $arguments,
                 $container,
                 $config,
                 transport: 'grpc',

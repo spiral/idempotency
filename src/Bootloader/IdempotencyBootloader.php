@@ -9,10 +9,12 @@ use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spiral\Boot\Bootloader\Bootloader;
 use Spiral\Core\FactoryInterface;
+use Spiral\Idempotency\ArgumentKeyResolver;
 use Spiral\Idempotency\Config\IdempotencyConfig;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\StorageFactory;
 use Spiral\Idempotency\StorageServices;
+use Spiral\Idempotency\Internal\Key\DefaultArgumentKeyResolver;
 use Spiral\Idempotency\Internal\Key\DefaultKeyResolver;
 use Spiral\Idempotency\Internal\Lease\RandomTokenFactory;
 use Spiral\Idempotency\Internal\Pipeline\DefaultFailureClassifier;
@@ -46,6 +48,7 @@ final class IdempotencyBootloader extends Bootloader
         return [
             ClockInterface::class => SystemClock::class,
             KeyResolver::class => DefaultKeyResolver::class,
+            ArgumentKeyResolver::class => DefaultArgumentKeyResolver::class,
             TokenFactory::class => RandomTokenFactory::class,
             FailureClassifier::class => DefaultFailureClassifier::class,
             IdempotencyRegistry::class => $this->initRegistry(...),
