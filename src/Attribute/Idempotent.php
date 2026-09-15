@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spiral\Idempotency\Attribute;
 
+use Spiral\Idempotency\FailurePolicy;
+
 /**
  * Marks a handler as idempotent. The target carries a *semantic storage alias*; the
  * concrete driver and the declared guarantee live in config — infra never leaks into
@@ -49,6 +51,11 @@ final readonly class Idempotent
      *
      *        Applies to the transport (attribute/interceptor) path only — a direct
      *        {@see \Spiral\Idempotency\Idempotency::execute()} call takes the final key as given.
+     * @param FailurePolicy|null $failurePolicy what happens to the key when the operation throws:
+     *        {@see FailurePolicy::Cache} turns a Domain failure into a replayable negative outcome,
+     *        {@see FailurePolicy::Release} frees the key on any failure so the next delivery re-runs the
+     *        operation. `null` = this transport's default (queue: Release; HTTP/gRPC: Cache).
+     *        Lease/AtLeastOnce storages only — the inbox and at-most-once drivers ignore it.
      */
     public function __construct(
         public string $storage,
@@ -56,5 +63,6 @@ final readonly class Idempotent
         public ?int $lockTtl = null,
         public ?int $ttl = null,
         public ?string $scope = null,
+        public ?FailurePolicy $failurePolicy = null,
     ) {}
 }

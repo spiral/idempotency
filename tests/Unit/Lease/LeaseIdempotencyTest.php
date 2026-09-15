@@ -11,6 +11,7 @@ use Spiral\Idempotency\Exception\IdempotencyException;
 use Spiral\Idempotency\Exception\LeaseLostException;
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\ExecuteOptions;
+use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\Internal\Lease\LeaseIdempotency;
 use Spiral\Idempotency\Internal\Lease\DefaultLeaseManager;
@@ -314,6 +315,78 @@ final class LeaseIdempotencyTest
         Assert::same($first, 'transient-1');
         Assert::same($second, 'transient-2');
         Assert::same($calls, 2);
+    }
+
+    public function releasePolicyReRunsTheOperationAfterADomainFailure(): void
+    {
+        $driver = $this->driver();
+        $calls = 0;
+        $op = static function () use (&$calls): never {
+            ++$calls;
+            throw new \RuntimeException('listener blew up');
+        };
+        $options = new ExecuteOptions(failurePolicy: FailurePolicy::Release);
+
+        foreach (['first', 'second'] as $_) {
+            try {
+                $driver->execute('k', $op, $options);
+                Assert::fail('the domain failure must reach the caller');
+            } catch (\RuntimeException $e) {
+                // Release rethrows the ORIGINAL throwable, never a cached snapshot.
+                Assert::same($e::class, \RuntimeException::class);
+            }
+        }
+
+        // Nothing was completed, so the second call re-ran instead of replaying.
+        Assert::same($calls, 2);
+    }
+
+    public function releasePolicyFreesTheKeyForABugFailureToo(): void
+    {
+        // Bug would normally reach error(); Release overrides the kind entirely, and error() equally
+        // leaves the key free — what this pins is that the ORIGINAL throwable still reaches the caller.
+        $classifier = new DefaultFailureClassifier(bugExceptions: [\LogicException::class]);
+        $driver = $this->driver(classifier: $classifier);
+        $calls = 0;
+        $op = static function () use (&$calls): never {
+            ++$calls;
+            throw new \LogicException('bug');
+        };
+        $options = new ExecuteOptions(failurePolicy: FailurePolicy::Release);
+
+        foreach (['first', 'second'] as $_) {
+            try {
+                $driver->execute('k', $op, $options);
+            } catch (\LogicException) {
+            }
+        }
+
+        Assert::same($calls, 2);
+    }
+
+    public function cachePolicyReplaysTheDomainFailure(): void
+    {
+        $driver = $this->driver();
+        $calls = 0;
+        $op = static function () use (&$calls): never {
+            ++$calls;
+            throw new \RuntimeException('insufficient funds');
+        };
+        $options = new ExecuteOptions(failurePolicy: FailurePolicy::Cache);
+
+        try {
+            $driver->execute('k', $op, $options);
+        } catch (\RuntimeException) {
+        }
+
+        try {
+            $driver->execute('k', $op, $options);
+            Assert::fail('replay should rethrow the cached outcome');
+        } catch (CachedDomainFailureException $replayed) {
+            Assert::same($replayed->originalClass, \RuntimeException::class);
+        }
+
+        Assert::same($calls, 1);
     }
 
     public function perCallOptionsOverrideConfiguredTtls(): void

@@ -11,6 +11,7 @@ use Spiral\Core\Config\Proxy;
 use Spiral\Idempotency\ArgumentKeyResolver;
 use Spiral\Idempotency\Config\IdempotencyConfig;
 use Spiral\Idempotency\Exception\MisconfigurationException;
+use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\Interceptor\PipelineIdempotencyInterceptor;
 use Spiral\Idempotency\Interceptor\IdempotencyInterceptor;
@@ -102,6 +103,9 @@ final class GrpcIdempotencyBootloader extends Bootloader
                 $container,
                 $config,
                 transport: 'grpc',
+                // Like HTTP: the caller repeats the RPC itself, so a failure is a cached outcome of this
+                // key and the retry answers with the same status.
+                failurePolicy: FailurePolicy::Cache,
             ),
         );
     }

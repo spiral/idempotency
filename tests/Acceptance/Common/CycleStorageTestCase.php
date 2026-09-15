@@ -26,6 +26,7 @@ use Spiral\Idempotency\Driver\Cycle\Internal\CycleLeaseStorage;
 use Spiral\Idempotency\Exception\LeaseLostException;
 use Spiral\Idempotency\Exception\MisconfigurationException;
 use Spiral\Idempotency\ExecuteOptions;
+use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\IdempotencyRegistry;
@@ -338,6 +339,27 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
         Assert::same($calls, 1);
     }
 
+    public function inboxIgnoresTheReleaseFailurePolicy(): void
+    {
+        // Same asymmetry as Uncacheable: FailurePolicy is a lease concept. A committed inbox row is
+        // terminal, so Release cannot make a second call re-run the side-effect.
+        $key = $this->key();
+        $driver = $this->inboxDriver();
+        $options = new ExecuteOptions(failurePolicy: FailurePolicy::Release);
+        $calls = 0;
+        $op = function (IdempotencyContext $c) use (&$calls, $key): string {
+            ++$calls;
+            \assert($c instanceof CycleContext);
+            $c->database()->insert('ledger')->values(['note' => $key])->run();
+            return 'r1';
+        };
+
+        Assert::same($driver->execute($key, $op, $options), 'r1');
+        Assert::same($driver->execute($key, $op, $options), 'r1');
+        Assert::same($this->ledgerCount($key), 1);
+        Assert::same($calls, 1);
+    }
+
     // ----------------------------------------------------------------- at-most-once (dedup-guard) driver
 
     public function atMostOnceRunsEffectOnce(): void
@@ -383,6 +405,31 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
 
         // ...but the marker persists, so the retry is refused: no re-run, exactly one partial effect.
         Assert::null($driver->execute($key, $op));
+        Assert::same($this->ledgerCount($key), 1);
+        Assert::same($calls, 1);
+    }
+
+    public function atMostOnceIgnoresTheReleaseFailurePolicy(): void
+    {
+        // Honouring Release here would let the effect run twice — the one thing "≤ once" forbids.
+        $key = $this->key();
+        $driver = $this->atMostOnceDriver();
+        $options = new ExecuteOptions(failurePolicy: FailurePolicy::Release);
+        $calls = 0;
+        $op = function () use (&$calls, $key): string {
+            ++$calls;
+            $this->db()->insert('ledger')->values(['note' => $key])->run();
+            throw new \RuntimeException('boom');
+        };
+
+        try {
+            $driver->execute($key, $op, $options);
+            Assert::fail('the operation must propagate its RuntimeException');
+        } catch (\RuntimeException) {
+        }
+
+        // The marker stands despite Release: the retry is refused, not re-run.
+        Assert::null($driver->execute($key, $op, $options));
         Assert::same($this->ledgerCount($key), 1);
         Assert::same($calls, 1);
     }

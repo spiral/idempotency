@@ -206,6 +206,10 @@ $queue->addConsumeInterceptor(IdempotencyInterceptor::class);
 > and it is `RetryPolicyInterceptor` that catches it and re-enqueues the job with the carried delay.
 > We reuse the framework's retry engine rather than reimplementing backoff.
 
+A failing job **releases** its key (`FailurePolicy::Release` is the queue default), so the redelivery
+the retry policy schedules actually re-runs the handler instead of replaying the cached failure. Pass
+`failurePolicy: FailurePolicy::Cache` on the attribute for a job whose failure is a final answer.
+
 Mark a job handler — the key comes from the **payload** via the attribute's `key` path, or from a
 job **header** the producer set (`Options::withHeader('Idempotency-Key', ...)`):
 
@@ -314,6 +318,7 @@ snapshotted: they stay exceptions so the key is released and a retry re-runs.
 | `lockTtl` | Override of the PROCESSING lock TTL, seconds (lease driver only)                                                                                                 |
 | `ttl`     | Override of the completed-record retention TTL, seconds                                                                                                          |
 | `scope`   | Key namespace, see below                                                                                                                                         |
+| `failurePolicy` | What a thrown failure does to the key: `Cache` (replay it) or `Release` (free the key, the next call re-runs). `null` = the transport default, see below   |
 
 The attribute goes on a **method** or on a **class**. On a class it covers **every** method the
 transport dispatches to on that class, including ones inherited from an abstract base — the only way
@@ -377,6 +382,7 @@ When the key is already known, skip the attribute and call the driver directly:
 
 ```php
 use Spiral\Idempotency\ExecuteOptions;
+use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\IdempotencyRegistry;
 
@@ -389,7 +395,7 @@ public function handle(string $transactionId): Receipt
     return $this->registry->get('payments')->execute(
         $transactionId,
         static fn(IdempotencyContext $ctx): Receipt => /* the operation */,
-        new ExecuteOptions(lockTtl: 60, ttl: 86400),
+        new ExecuteOptions(lockTtl: 60, ttl: 86400, failurePolicy: FailurePolicy::Cache),
     );
 }
 ```
@@ -427,6 +433,31 @@ final class PaymentDeclined extends \DomainException implements ReplayableFailur
     }
 }
 ```
+
+#### Per-operation failure policy
+
+Classification decides *what kind* of failure happened; `FailurePolicy` decides whether the operation
+may run again under the same key at all:
+
+| Policy | Effect on a thrown failure |
+|---|---|
+| `Cache` | The table above applies: a Domain failure becomes a cached negative outcome and is replayed |
+| `Release` | Any failure frees the key and the original throwable is rethrown unchanged — the next call re-runs the operation |
+
+The default comes from the transport, and follows who owns the retry: **queue → `Release`** (the broker
+redelivers the job), **HTTP and gRPC → `Cache`** (the client repeats the call itself and must see the
+same answer). A direct `execute()` without options also caches. Override per operation on the attribute
+or in `ExecuteOptions`:
+
+```php
+use Spiral\Idempotency\FailurePolicy;
+
+#[Idempotent(storage: 'jobs', key: 'event.id', failurePolicy: FailurePolicy::Release)]
+```
+
+This is a **lease/AtLeastOnce** contract. The inbox (ExactlyOnce) and at-most-once drivers ignore it:
+an inbox failure already rolls the dedup row back with the side-effect, and a committed record of
+either driver is terminal — releasing it would let the effect run twice.
 
 #### Consistent HTTP status for a thrown domain failure
 

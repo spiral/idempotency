@@ -12,6 +12,7 @@ use Spiral\Idempotency\Exception\IdempotencyException;
 use Spiral\Idempotency\Exception\LeaseLostException;
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\ExecuteOptions;
+use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\GuaranteeProvider;
 use Spiral\Idempotency\Idempotency;
@@ -38,7 +39,9 @@ use Spiral\Serializer\SerializerInterface;
  * Failure classification lives in the execution pipeline (a {@see \Spiral\Idempotency\Pipeline\Middleware\ClassifierMiddleware}),
  * which rethrows a {@see ClassifiedException} carrying the {@see FailureKind}; this handler reads that
  * kind to pick the terminal transition. When no classifier ran (bare throwable), it falls back to its
- * own {@see $classifier}, so the handler stays correct with or without that middleware.
+ * own {@see $classifier}, so the handler stays correct with or without that middleware. An
+ * {@see ExecuteOptions::$failurePolicy} of {@see FailurePolicy::Release} overrides all of it: the key is
+ * freed on any failure and the original throwable is rethrown.
  *
  * Losing the lease at the terminal transition is an observable event, NOT an outcome of the operation.
  * The operation has already run; its result (or its throwable) belongs to the caller. So when a terminal
@@ -155,7 +158,7 @@ final readonly class LeaseIdempotency implements Idempotency, GuaranteeProvider
                 static fn(ExecutionCall $c): mixed => ($c->operation)($c->context),
             );
         } catch (\Throwable $e) {
-            $this->terminateFailure($lease, $e, $retentionTtl);
+            $this->terminateFailure($lease, $e, $retentionTtl, $options->failurePolicy ?? FailurePolicy::Cache);
             // Surface the original throwable, not the ClassifiedException wrapper.
             throw $e instanceof ClassifiedException ? ($e->getPrevious() ?? $e) : $e;
         }
@@ -178,9 +181,25 @@ final readonly class LeaseIdempotency implements Idempotency, GuaranteeProvider
 
     /**
      * @param int<1, max> $retentionTtl
+     * @param FailurePolicy $policy {@see FailurePolicy::Release} short-circuits the classification: any
+     *        failure frees the key so the next call re-runs the operation.
      */
-    private function terminateFailure(Acquired $lease, \Throwable $e, int $retentionTtl): void
-    {
+    private function terminateFailure(
+        Acquired $lease,
+        \Throwable $e,
+        int $retentionTtl,
+        FailurePolicy $policy,
+    ): void {
+        if ($policy === FailurePolicy::Release) {
+            // The caller owns the retry: free the key on any failure, never classify. The throwable
+            // itself is rethrown by run(), unchanged.
+            $this->terminal(function () use ($lease): void {
+                $this->manager->abort($lease->key, $lease->token);
+            }, $lease->key);
+
+            return;
+        }
+
         // The kind comes from the classifier middleware (via ClassifiedException); fall back to our own
         // classifier when the operation threw a bare throwable (no classifier middleware in the stack).
         $original = $e instanceof ClassifiedException ? ($e->getPrevious() ?? $e) : $e;

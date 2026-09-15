@@ -35,6 +35,10 @@ use Spiral\Idempotency\Attribute\Idempotent;
   or to a value with no string form (array, plain object, null, bool) — fails fast.
 - `lockTtl` / `ttl` — per-operation overrides (lockTtl: lease driver only; the inbox ignores it —
   its mutual exclusion is the row lock of the in-progress INSERT, not a time-bound lease).
+- `failurePolicy` — `FailurePolicy::Cache` (a Domain failure becomes a cached, replayed outcome) or
+  `FailurePolicy::Release` (any failure frees the key, the original throwable is rethrown and the next
+  call re-runs). `null` = the transport default: queue `Release`, HTTP/gRPC `Cache`. Lease storages
+  only — see [`failures-and-gc.md`](failures-and-gc.md).
 - `scope` — key namespace: `null` (default) = per-operation `Class::method` isolation, where the
   class is the **concrete** target, not the one declaring the method; `'name'` = deliberately
   shared across endpoints (e.g. an HTTP endpoint and a queue job that are the same logical
@@ -173,12 +177,12 @@ own transaction.
 When the key is already known, skip the attribute:
 
 ```php
-use Spiral\Idempotency\{ExecuteOptions, IdempotencyContext, IdempotencyRegistry};
+use Spiral\Idempotency\{ExecuteOptions, FailurePolicy, IdempotencyContext, IdempotencyRegistry};
 
 $this->registry->get('payments')->execute(
     $transactionId,
     static fn(IdempotencyContext $ctx): Receipt => /* the operation */,
-    new ExecuteOptions(lockTtl: 60, ttl: 86400),
+    new ExecuteOptions(lockTtl: 60, ttl: 86400, failurePolicy: FailurePolicy::Cache),
 );
 ```
 

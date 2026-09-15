@@ -40,8 +40,9 @@ list the aliases and guarantees the project actually declares:
 php <this-skill-dir>/scripts/list-storages.php --root=.
 ```
 
-**Failures and operations** (failure classification, exact-type failure replay, consistent HTTP
-status for thrown domain failures, garbage collection, customization points) → read
+**Failures and operations** (failure classification, `Cache`/`Release` failure policy, exact-type
+failure replay, consistent HTTP status for thrown domain failures, garbage collection, customization
+points) → read
 [`references/failures-and-gc.md`](references/failures-and-gc.md).
 
 Both scripts are read-only; `<this-skill-dir>` is the directory containing this SKILL.md.
@@ -62,6 +63,8 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
 - Default `PhpSerializer` runs `unserialize()` on replay — the idempotency table/keyspace is the
   trust boundary. Multiple writers → bind a JSON `SerializerInterface` and keep results JSON-safe.
 - `5xx` (HTTP) / transient statuses (gRPC) are not cached by design — retries re-run.
+- A failing **queue** job releases its key by default (`FailurePolicy::Release`), an HTTP/gRPC failure
+  is cached; set `failurePolicy:` on `#[Idempotent]` when the operation needs the other one.
 - Setting `retentionTtl` on inbox/at-most-once narrows the dedup window — swept records mean a
   late duplicate re-executes.
 - The upsert dedup relies on `cycle/database >= 2.21` (MySQL/Postgres `DO NOTHING` fixes).
