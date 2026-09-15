@@ -66,7 +66,9 @@ final readonly class CycleInboxDriver implements Idempotency, GuaranteeProvider
     {
         // $options->lockTtl is intentionally ignored: an inbox enforces mutual exclusion via the row
         // lock of the in-progress INSERT, not a time-bound lease. $options->ttl is reserved for a future
-        // inbox retention/GC (rows are currently kept indefinitely).
+        // inbox retention/GC (rows are currently kept indefinitely). $options->failurePolicy is a no-op
+        // as well — a throwing operation rolls the whole transaction back, dedup row included, which is
+        // already Release; a committed one cannot be undone, so Cache has nothing to cache either.
         /** @var non-empty-string $key */
         $transaction = ($this->transaction)();
         \assert($transaction instanceof Transaction);

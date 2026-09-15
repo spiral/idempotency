@@ -11,6 +11,7 @@ use Spiral\Core\Config\Proxy;
 use Spiral\Idempotency\ArgumentKeyResolver;
 use Spiral\Idempotency\Config\IdempotencyConfig;
 use Spiral\Idempotency\Exception\MisconfigurationException;
+use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\Interceptor\PipelineIdempotencyInterceptor;
 use Spiral\Idempotency\Interceptor\IdempotencyInterceptor;
@@ -102,6 +103,9 @@ final class HttpIdempotencyBootloader extends Bootloader
                 $container,
                 $config,
                 transport: 'http',
+                // The client, not the server, decides whether to repeat the request: a failure is an
+                // outcome of this key and is cached, so a repeat with the same key answers the same way.
+                failurePolicy: FailurePolicy::Cache,
             ),
         );
     }

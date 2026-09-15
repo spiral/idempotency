@@ -11,6 +11,7 @@ use Spiral\Core\Config\Proxy;
 use Spiral\Idempotency\ArgumentKeyResolver;
 use Spiral\Idempotency\Config\IdempotencyConfig;
 use Spiral\Idempotency\Exception\MisconfigurationException;
+use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\Interceptor\PipelineIdempotencyInterceptor;
 use Spiral\Idempotency\Interceptor\IdempotencyInterceptor;
@@ -98,6 +99,9 @@ final class QueueIdempotencyBootloader extends Bootloader
                 $container,
                 $config,
                 transport: 'queue',
+                // The broker owns redelivery: a failing job must leave its key free so the retry runs
+                // the handler again instead of replaying a cached failure.
+                failurePolicy: FailurePolicy::Release,
             ),
         );
     }

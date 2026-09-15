@@ -7,10 +7,15 @@ namespace Spiral\Idempotency\Tests\Unit\Bootloader;
 use Psr\Container\ContainerInterface;
 use Spiral\Core\Container;
 use Spiral\Core\Scope;
+use Spiral\Idempotency\Attribute\Idempotent;
 use Spiral\Idempotency\Bootloader\QueueIdempotencyBootloader;
 use Spiral\Idempotency\Config\IdempotencyConfig;
 use Spiral\Idempotency\Exception\MisconfigurationException;
+use Spiral\Idempotency\FailurePolicy;
+use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\IdempotencyRegistry;
+use Spiral\Idempotency\Tests\Unit\Stub\RecordingHandler;
+use Spiral\Idempotency\Tests\Unit\Stub\RecordingIdempotency;
 use Spiral\Idempotency\Interceptor\PipelineIdempotencyInterceptor;
 use Spiral\Idempotency\Interceptor\IdempotencyInterceptor;
 use Spiral\Idempotency\ArgumentKeyResolver;
@@ -30,6 +35,15 @@ final class QueuePlainFixture
     public function plain(): string
     {
         throw new \LogicException('Not invoked directly — the handler stub produces the result.');
+    }
+}
+
+final class QueueAnnotatedFixture
+{
+    #[Idempotent(storage: 'jobs', key: 'id')]
+    public function handle(string $id): string
+    {
+        throw new \LogicException('Not invoked directly.');
     }
 }
 
@@ -126,6 +140,35 @@ final class QueueIdempotencyBootloaderTest
         );
 
         Assert::same($result, 'handled');
+    }
+
+    public function queueFlavorDefaultsToReleasingTheKeyOnFailure(): void
+    {
+        // The broker redelivers a failed job, so the queue flavor must not let a failure become a cached
+        // negative outcome — the retry has to reach the handler again.
+        $container = $this->container();
+        $storage = new RecordingIdempotency();
+        $registry = $container->get(IdempotencyRegistry::class);
+        \assert($registry instanceof IdempotencyRegistry);
+        $registry->register('jobs', $storage, Guarantee::AtLeastOnce);
+
+        $context = new CallContext(
+            \Spiral\Interceptors\Context\Target::fromReflectionMethod(
+                new \ReflectionMethod(QueueAnnotatedFixture::class, 'handle'),
+                new QueueAnnotatedFixture(),
+            ),
+            ['id' => 'job-1'],
+        );
+
+        $container->runScope(
+            new Scope(name: 'queue'),
+            static fn(IdempotencyInterceptor $interceptor): mixed => $interceptor->intercept(
+                $context,
+                new RecordingHandler(),
+            ),
+        );
+
+        Assert::same($storage->calls[0]->options?->failurePolicy, FailurePolicy::Release);
     }
 
     public function proxyInvokedOutsideTransportScopeFailsFast(): never

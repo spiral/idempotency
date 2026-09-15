@@ -30,8 +30,8 @@ interface Idempotency
      * @template T
      * @param non-empty-string $key
      * @param \Closure(IdempotencyContext): T $operation
-     * @param ExecuteOptions|null $options per-call TTL overrides; null fields fall back to the storage's
-     *        configured defaults
+     * @param ExecuteOptions|null $options per-call overrides (TTLs, failure policy); null fields fall
+     *        back to the storage's configured defaults
      * @return T
      */
     public function execute(string $key, \Closure $operation, ?ExecuteOptions $options = null): mixed;

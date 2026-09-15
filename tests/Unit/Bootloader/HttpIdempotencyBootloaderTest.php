@@ -7,10 +7,15 @@ namespace Spiral\Idempotency\Tests\Unit\Bootloader;
 use Psr\Container\ContainerInterface;
 use Spiral\Core\Container;
 use Spiral\Core\Scope;
+use Spiral\Idempotency\Attribute\Idempotent;
 use Spiral\Idempotency\Bootloader\HttpIdempotencyBootloader;
 use Spiral\Idempotency\Config\IdempotencyConfig;
 use Spiral\Idempotency\Exception\MisconfigurationException;
+use Spiral\Idempotency\FailurePolicy;
+use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\IdempotencyRegistry;
+use Spiral\Idempotency\Tests\Unit\Stub\RecordingHandler;
+use Spiral\Idempotency\Tests\Unit\Stub\RecordingIdempotency;
 use Spiral\Idempotency\Interceptor\PipelineIdempotencyInterceptor;
 use Spiral\Idempotency\Interceptor\IdempotencyInterceptor;
 use Spiral\Idempotency\ArgumentKeyResolver;
@@ -30,6 +35,15 @@ final class PlainFixture
     public function plain(): string
     {
         throw new \LogicException('Not invoked directly — the handler stub produces the result.');
+    }
+}
+
+final class HttpAnnotatedFixture
+{
+    #[Idempotent(storage: 'payments', key: 'id')]
+    public function pay(string $id): string
+    {
+        throw new \LogicException('Not invoked directly.');
     }
 }
 
@@ -126,6 +140,35 @@ final class HttpIdempotencyBootloaderTest
         );
 
         Assert::same($result, 'handled');
+    }
+
+    public function httpFlavorDefaultsToCachingTheFailure(): void
+    {
+        // Over HTTP the client repeats the request itself: a failure is an outcome of this key, so a
+        // repeat with the same Idempotency-Key must answer the same way instead of re-running.
+        $container = $this->container();
+        $storage = new RecordingIdempotency();
+        $registry = $container->get(IdempotencyRegistry::class);
+        \assert($registry instanceof IdempotencyRegistry);
+        $registry->register('payments', $storage, Guarantee::AtLeastOnce);
+
+        $context = new CallContext(
+            \Spiral\Interceptors\Context\Target::fromReflectionMethod(
+                new \ReflectionMethod(HttpAnnotatedFixture::class, 'pay'),
+                new HttpAnnotatedFixture(),
+            ),
+            ['id' => 'pay-1'],
+        );
+
+        $container->runScope(
+            new Scope(name: 'http'),
+            static fn(IdempotencyInterceptor $interceptor): mixed => $interceptor->intercept(
+                $context,
+                new RecordingHandler(),
+            ),
+        );
+
+        Assert::same($storage->calls[0]->options?->failurePolicy, FailurePolicy::Cache);
     }
 
     public function proxyInvokedOutsideTransportScopeFailsFast(): never

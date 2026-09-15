@@ -12,6 +12,27 @@ customize the mapping.
 | **Infrastructure** | `\Error`, or `\Exception` implementing `Retryable` | Key released; the transport/client retries |
 | **Bug** | only via explicit config: `DefaultFailureClassifier(bugExceptions: [...])` | Key released; no re-enqueue — report and fix |
 
+## Failure policy (`Cache` vs `Release`)
+
+Classification says what kind of failure happened; `FailurePolicy` says whether the key stays taken.
+
+| Policy | Effect on a thrown failure |
+|---|---|
+| `Cache` | The table above applies: a Domain failure is cached and replayed |
+| `Release` | Any failure aborts the lease and rethrows the original throwable unchanged; the next call re-runs the operation |
+
+Defaults follow who owns the retry — queue: `Release` (the broker redelivers), HTTP and gRPC: `Cache`
+(the client repeats the call and must get the same answer), direct `execute()`: `Cache`. Override per
+operation: `#[Idempotent(..., failurePolicy: FailurePolicy::Release)]` or
+`new ExecuteOptions(failurePolicy: ...)`.
+
+Lease/AtLeastOnce storages only. The inbox and at-most-once drivers ignore the policy: an inbox failure
+already rolls the dedup row back together with the side-effect, and a committed record of either driver
+is terminal — releasing it would run the effect twice.
+
+With `Release` there is no cached negative outcome, so nothing below about failure replay applies to
+such an operation.
+
 ## Exact-type failure replay
 
 A cached domain failure replays as `CachedDomainFailureException` carrying the original class name

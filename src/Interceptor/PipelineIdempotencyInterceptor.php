@@ -14,6 +14,7 @@ use Spiral\Idempotency\Config\IdempotencyConfig;
 use Spiral\Idempotency\Exception\MisconfigurationException;
 use Spiral\Idempotency\Exception\MissingKeyException;
 use Spiral\Idempotency\ExecuteOptions;
+use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\KeyResolver;
@@ -65,6 +66,9 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
 
     /**
      * @param non-empty-string $transport config key of this transport's resolution stack
+     * @param FailurePolicy $failurePolicy what a failing operation does to the key when the attribute
+     *        states no policy — a transport that owns redelivery (queue, events) releases, one whose
+     *        client repeats the call itself (HTTP, gRPC) caches
      */
     public function __construct(
         private readonly IdempotencyRegistry $registry,
@@ -73,6 +77,7 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
         private readonly ContainerInterface $container,
         private readonly IdempotencyConfig $config,
         private readonly string $transport,
+        private readonly FailurePolicy $failurePolicy = FailurePolicy::Cache,
     ) {}
 
     public function intercept(CallContextInterface $context, HandlerInterface $handler): mixed
@@ -96,7 +101,11 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
             // Expose the driver's context (e.g. a CycleContext with the transactional connection) so the
             // action can inject IdempotencyContext and narrow to it.
             operation: fn(IdempotencyContext $operation): mixed => $this->dispatch($operation, $handler, $context),
-            options: new ExecuteOptions($attribute->lockTtl, $attribute->ttl),
+            options: new ExecuteOptions(
+                $attribute->lockTtl,
+                $attribute->ttl,
+                $attribute->failurePolicy ?? $this->failurePolicy,
+            ),
             key: $this->keyFromArguments($attribute, $context, $scope),
             keyScope: $scope,
         );
