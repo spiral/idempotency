@@ -107,6 +107,12 @@ return [
 ];
 ```
 
+`transports` is optional as a whole — omit it when no transport bootloader is registered (the
+`IdempotencyRegistry::execute()` usage below). Once one is registered, its own entry becomes
+mandatory: a missing `transports.<name>` throws `MisconfigurationException` on the first
+`#[Idempotent]` call instead of running an empty pipeline that deduplicates on nothing. An explicit
+`'http' => []` is valid — the key then comes only from the attribute.
+
 Storage drivers available under `storages`:
 
 | Config                                | Guarantee   | Backend                                                                                                |

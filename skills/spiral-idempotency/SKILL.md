@@ -51,8 +51,9 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
 
 - Reference `IdempotencyInterceptor` (alias), never the concrete `PipelineIdempotencyInterceptor`.
 - Every registered transport bootloader needs its `transports.<name>` entry in config — `[]` is
-  valid, a missing one throws on the first `#[Idempotent]` call. Events are the exception: no
-  interceptor, no config entry.
+  valid, a missing one throws on the first `#[Idempotent]` call. The `transports` section as a whole
+  is optional (no transport bootloader → omit it). Events are the exception: no interceptor, no
+  config entry.
 - Outcome middleware outer, key middleware inner in every `transports.<name>` list.
 - Queue: `RetryPolicyInterceptor` must stay outer of the idempotency interceptor on consume.
 - A handler whose entry point is inherited (an abstract `handle()`) carries `#[Idempotent]` on the

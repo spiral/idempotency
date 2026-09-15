@@ -53,16 +53,18 @@ final class HttpIdempotencyBootloaderTest
 {
     /**
      * The interceptor dependencies an application container would provide.
+     *
+     * @param array<string, list<class-string>>|null $transports null omits the section entirely.
      */
-    private function container(): Container
+    private function container(?array $transports = ['http' => []]): Container
     {
         $container = new Container();
         $container->bindSingleton(IdempotencyRegistry::class, new IdempotencyRegistry());
         $container->bindSingleton(KeyResolver::class, new DefaultKeyResolver());
         $container->bindSingleton(ArgumentKeyResolver::class, new DefaultArgumentKeyResolver());
-        $container->bindSingleton(IdempotencyConfig::class, new IdempotencyConfig([
-            'transports' => ['http' => []],
-        ]));
+        $container->bindSingleton(IdempotencyConfig::class, new IdempotencyConfig(
+            $transports === null ? [] : ['transports' => $transports],
+        ));
 
         $bootloader = new HttpIdempotencyBootloader();
         foreach ($bootloader->defineBindings() as $alias => $resolver) {
@@ -169,6 +171,34 @@ final class HttpIdempotencyBootloaderTest
         );
 
         Assert::same($storage->calls[0]->options?->failurePolicy, FailurePolicy::Cache);
+    }
+
+    public function missingHttpStackFailsOnTheFirstIdempotentCall(): never
+    {
+        // The bootloader is registered, so the app dispatches over HTTP and owes a `transports.http`
+        // stack — the check that survives the section becoming optional.
+        $container = $this->container(transports: null);
+        $registry = $container->get(IdempotencyRegistry::class);
+        \assert($registry instanceof IdempotencyRegistry);
+        $registry->register('payments', new RecordingIdempotency(), Guarantee::AtLeastOnce);
+
+        $context = new CallContext(
+            \Spiral\Interceptors\Context\Target::fromReflectionMethod(
+                new \ReflectionMethod(HttpAnnotatedFixture::class, 'pay'),
+                new HttpAnnotatedFixture(),
+            ),
+            ['id' => 'pay-1'],
+        );
+
+        Expect::exception(MisconfigurationException::class)->withMessageContaining('transports.http');
+
+        $container->runScope(
+            new Scope(name: 'http'),
+            static fn(IdempotencyInterceptor $interceptor): mixed => $interceptor->intercept(
+                $context,
+                new RecordingHandler(),
+            ),
+        );
     }
 
     public function proxyInvokedOutsideTransportScopeFailsFast(): never
