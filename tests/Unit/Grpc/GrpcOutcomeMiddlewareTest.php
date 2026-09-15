@@ -12,21 +12,22 @@ use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Grpc\DomainFailureMapper;
 use Spiral\Idempotency\Grpc\GrpcOutcomeMiddleware;
 use Spiral\Idempotency\IdempotencyContext;
-use Spiral\Idempotency\Internal\Lease\LeaseIdempotency;
 use Spiral\Idempotency\Internal\Lease\DefaultLeaseManager;
+use Spiral\Idempotency\Internal\Lease\LeaseIdempotency;
 use Spiral\Idempotency\Internal\Lease\Storage\InMemoryLeaseStorage;
 use Spiral\Idempotency\Lease\Locked;
 use Spiral\Idempotency\Pipeline\IdempotencyCall;
 use Spiral\Idempotency\Pipeline\Pipeline;
 use Spiral\Idempotency\Pipeline\Retryable;
 use Spiral\Idempotency\Tests\Support\MutableClock;
+use Spiral\Idempotency\Tests\Unit\Stub\StubIdempotencyContext;
 use Spiral\Interceptors\Context\CallContext;
 use Spiral\Interceptors\Context\Target;
 use Spiral\RoadRunner\GRPC\Context;
 use Spiral\RoadRunner\GRPC\ContextInterface;
 use Spiral\RoadRunner\GRPC\Exception\GRPCException;
-use Spiral\RoadRunner\GRPC\ResponseHeaders;
 use Spiral\RoadRunner\GRPC\Exception\GRPCExceptionInterface;
+use Spiral\RoadRunner\GRPC\ResponseHeaders;
 use Spiral\RoadRunner\GRPC\StatusCode;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -107,16 +108,7 @@ final class GrpcOutcomeMiddlewareTest
 {
     private function context(): IdempotencyContext
     {
-        return new class implements IdempotencyContext {
-            public function getKey(): string
-            {
-                return 'k';
-            }
-
-            public function renew(bool $force = false): void
-            {
-            }
-        };
+        return new StubIdempotencyContext();
     }
 
     private function call(\Closure $operation): IdempotencyCall

@@ -8,6 +8,7 @@ use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\Pipeline\ExecutionCall;
 use Spiral\Idempotency\Pipeline\Middleware\FiberRenewalMiddleware;
+use Spiral\Idempotency\Tests\Unit\Stub\RecordingIdempotencyContext;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Test;
@@ -16,21 +17,9 @@ use Testo\Test;
 #[Covers(FiberRenewalMiddleware::class)]
 final class FiberRenewalMiddlewareTest
 {
-    private function context(): IdempotencyContext
+    private function context(): RecordingIdempotencyContext
     {
-        return new class implements IdempotencyContext {
-            public int $beats = 0;
-
-            public function getKey(): string
-            {
-                return 'k';
-            }
-
-            public function renew(bool $force = false): void
-            {
-                $this->beats++;
-            }
-        };
+        return new RecordingIdempotencyContext();
     }
 
     public function firesHeartbeatOnEachSuspend(): void
@@ -48,7 +37,7 @@ final class FiberRenewalMiddlewareTest
         $result = (new FiberRenewalMiddleware())->process($call, $next);
 
         Assert::same($result, 'done');
-        Assert::same($ctx->beats, 3);
+        Assert::same(\count($ctx->renewals), 3);
     }
 
     public function noSuspendPassesThroughWithZeroBeats(): void
@@ -61,7 +50,7 @@ final class FiberRenewalMiddlewareTest
         $result = (new FiberRenewalMiddleware())->process($call, $next);
 
         Assert::same($result, 'x');
-        Assert::same($ctx->beats, 0);
+        Assert::same(\count($ctx->renewals), 0);
     }
 
     public function exceptionPropagatesAfterHeartbeat(): void
@@ -84,7 +73,7 @@ final class FiberRenewalMiddlewareTest
 
         Assert::notNull($caught);
         Assert::same($caught->getMessage(), 'boom');
-        Assert::same($ctx->beats, 1);
+        Assert::same(\count($ctx->renewals), 1);
     }
 
     public function transparentUnderOuterFiber(): void
@@ -108,7 +97,7 @@ final class FiberRenewalMiddlewareTest
         $ret = $outer->getReturn();
 
         Assert::same($ret, ['tok1', 'tok2']);
-        Assert::same($ctx->beats, 2);
+        Assert::same(\count($ctx->renewals), 2);
     }
 
     /**
@@ -141,7 +130,7 @@ final class FiberRenewalMiddlewareTest
 
         Assert::same($ret, 'recovered');
         Assert::same($seen, ['caught:cancel']);
-        Assert::same($ctx->beats, 2);
+        Assert::same(\count($ctx->renewals), 2);
     }
 
     /**

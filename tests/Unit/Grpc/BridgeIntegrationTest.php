@@ -13,26 +13,26 @@ use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Grpc\GrpcKeyMiddleware;
 use Spiral\Idempotency\Grpc\GrpcOutcomeMiddleware;
 use Spiral\Idempotency\Guarantee;
-use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\Idempotency;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\Interceptor\PipelineIdempotencyInterceptor;
 use Spiral\Idempotency\Internal\Key\DefaultKeyResolver;
-use Spiral\Idempotency\Internal\Lease\LeaseIdempotency;
 use Spiral\Idempotency\Internal\Lease\DefaultLeaseManager;
+use Spiral\Idempotency\Internal\Lease\LeaseIdempotency;
 use Spiral\Idempotency\Internal\Lease\Storage\InMemoryLeaseStorage;
 use Spiral\Idempotency\KeyResolver;
 use Spiral\Idempotency\Pipeline\Pipeline;
 use Spiral\Idempotency\Tests\Support\MutableClock;
-use Spiral\Interceptors\Handler\AutowireHandler;
+use Spiral\Idempotency\Tests\Unit\Stub\StubIdempotencyContext;
 use Spiral\Interceptors\HandlerInterface;
+use Spiral\Interceptors\Handler\AutowireHandler;
+use Spiral\RoadRunnerBridge\GRPC\Internal\Dispatcher;
+use Spiral\RoadRunnerBridge\GRPC\Internal\Invoker;
 use Spiral\RoadRunner\GRPC\Context;
 use Spiral\RoadRunner\GRPC\ContextInterface;
 use Spiral\RoadRunner\GRPC\Method;
 use Spiral\RoadRunner\GRPC\ResponseHeaders;
 use Spiral\RoadRunner\GRPC\ServiceInterface;
-use Spiral\RoadRunnerBridge\GRPC\Internal\Dispatcher;
-use Spiral\RoadRunnerBridge\GRPC\Internal\Invoker;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Test;
@@ -72,16 +72,7 @@ final class FireOnceDriverStub implements Idempotency
 
         $this->seen[$key] = true;
 
-        return $operation(new class($key) implements IdempotencyContext {
-            public function __construct(private readonly string $key) {}
-
-            public function getKey(): string
-            {
-                return $this->key;
-            }
-
-            public function renew(bool $force = false): void {}
-        });
+        return $operation(new StubIdempotencyContext($key));
     }
 }
 

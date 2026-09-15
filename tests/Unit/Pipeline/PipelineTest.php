@@ -11,6 +11,7 @@ use Spiral\Idempotency\Pipeline\ExecutionMiddleware;
 use Spiral\Idempotency\Pipeline\IdempotencyCall;
 use Spiral\Idempotency\Pipeline\Pipeline;
 use Spiral\Idempotency\Pipeline\ResolutionMiddleware;
+use Spiral\Idempotency\Tests\Unit\Stub\StubIdempotencyContext;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Test;
@@ -134,13 +135,6 @@ final class PipelineTest
 
     private function executionContext(): IdempotencyContext
     {
-        return new class implements IdempotencyContext {
-            public function getKey(): string
-            {
-                return 'k';
-            }
-
-            public function renew(bool $force = false): void {}
-        };
+        return new StubIdempotencyContext();
     }
 }
