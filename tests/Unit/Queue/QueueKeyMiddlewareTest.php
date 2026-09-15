@@ -31,15 +31,21 @@ final class QueueKeyMiddlewareTest
     /**
      * @param array<string, list<string>> $headers
      */
-    private function jobContext(array $headers = []): CallContext
+    private function jobContext(array $headers = [], mixed $id = null): CallContext
     {
         $target = Target::fromReflectionMethod(
             new \ReflectionMethod(JobFixture::class, 'consume'),
             new JobFixture(),
         );
 
-        // Consume-side headers travel as a call ARGUMENT ('headers'), matching Spiral's queue Handler.
-        return new CallContext($target, ['headers' => $headers]);
+        // Consume-side headers and the broker job id travel as call ARGUMENTS, matching Spiral's queue
+        // Handler: new CallContext($target, ['driver', 'queue', 'id', 'payload', 'headers']).
+        $arguments = ['headers' => $headers];
+        if ($id !== null) {
+            $arguments['id'] = $id;
+        }
+
+        return new CallContext($target, $arguments);
     }
 
     private function call(mixed $context, ?string $key = null, ?string $keyScope = null): IdempotencyCall
@@ -130,6 +136,71 @@ final class QueueKeyMiddlewareTest
     {
         $middleware = new QueueKeyMiddleware(new DefaultKeyResolver());
         $call = $this->call($this->jobContext(['Idempotency-Key' => ['']]));
+
+        Expect::exception(MissingKeyException::class);
+
+        $middleware->process($call, static fn(IdempotencyCall $call): mixed => null);
+    }
+
+    public function fallsBackToJobIdWhenHeaderAbsent(): void
+    {
+        $middleware = new QueueKeyMiddleware(new DefaultKeyResolver(), fallbackToJobId: true);
+        $call = $this->call($this->jobContext(id: 'job-id-1'), keyScope: 'Op::run');
+
+        $received = null;
+        $middleware->process($call, static function (IdempotencyCall $call) use (&$received): mixed {
+            $received = $call;
+            return null;
+        });
+
+        Assert::notNull($received);
+        Assert::same($received->key, (new DefaultKeyResolver())->resolve('job-id-1', 'Op::run'));
+    }
+
+    public function headerWinsOverJobId(): void
+    {
+        $middleware = new QueueKeyMiddleware(new DefaultKeyResolver(), fallbackToJobId: true);
+        $call = $this->call($this->jobContext(['Idempotency-Key' => ['from-header']], id: 'job-id-1'));
+
+        $received = null;
+        $middleware->process($call, static function (IdempotencyCall $call) use (&$received): mixed {
+            $received = $call;
+            return null;
+        });
+
+        Assert::notNull($received);
+        Assert::same($received->key, (new DefaultKeyResolver())->resolve('from-header', null));
+    }
+
+    public function fallsBackToJobIdWhenHeaderBlank(): void
+    {
+        $middleware = new QueueKeyMiddleware(new DefaultKeyResolver(), fallbackToJobId: true);
+        $call = $this->call($this->jobContext(['Idempotency-Key' => ['']], id: 42));
+
+        $received = null;
+        $middleware->process($call, static function (IdempotencyCall $call) use (&$received): mixed {
+            $received = $call;
+            return null;
+        });
+
+        Assert::notNull($received);
+        Assert::same($received->key, (new DefaultKeyResolver())->resolve('42', null));
+    }
+
+    public function jobIdIgnoredWhenFallbackDisabled(): void
+    {
+        $middleware = new QueueKeyMiddleware(new DefaultKeyResolver());
+        $call = $this->call($this->jobContext(id: 'job-id-1'));
+
+        Expect::exception(MissingKeyException::class);
+
+        $middleware->process($call, static fn(IdempotencyCall $call): mixed => null);
+    }
+
+    public function missingJobIdThrowsMissingKeyWithFallbackEnabled(): void
+    {
+        $middleware = new QueueKeyMiddleware(new DefaultKeyResolver(), fallbackToJobId: true);
+        $call = $this->call($this->jobContext());
 
         Expect::exception(MissingKeyException::class);
 

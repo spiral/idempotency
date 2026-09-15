@@ -100,6 +100,9 @@ Rules for the `transports` section (uncomment/add the entries for the project):
 - **Every transport whose bootloader is registered must have an entry** — `[]` is valid (the key
   then comes only from the attribute), but a *missing* one throws `MisconfigurationException` on
   the first `#[Idempotent]` call.
+- **Middleware with constructor options** (a custom header name, `QueueKeyMiddleware`'s
+  `fallbackToJobId: true` — see the queue section of `usage.md`) are bound as configured instances in
+  a bootloader: the stack lists class names and resolves each through the container.
 - **Order is outer → inner, outcome middleware outermost** (it marshals responses: replay headers,
   `Locked` → 409/ABORTED, missing key → 400), the key middleware inside it.
 

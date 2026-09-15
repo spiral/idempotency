@@ -217,6 +217,25 @@ public function invoke(string $orderId, array $payload): void
 }
 ```
 
+When the producer is outside the application — a CDC pipeline publishing from a transactional outbox
+table, say — the job carries no headers at all. Enable the **job-id fallback**: the broker job id
+(the `id` argument of the consume call context) becomes the key material. Mind what it identifies: one
+broker **message**, not the logical operation. The id is the same when the broker redelivers the message
+(consumer crash, missing ack); a job re-published by a retry policy or pushed a second time by the
+producer carries a new one, and whether a driver keeps the id across its own requeue is driver-specific.
+To deduplicate the operation itself, keep a key from the payload (`key: 'payload.<field>'`) or the
+header. The fallback is off by default so a producer that merely forgot the header does not get silent,
+weaker deduplication:
+
+```php
+// a bootloader of the app — the config stack lists class names, so bind the configured instance
+QueueKeyMiddleware::class => static fn(KeyResolver $resolver): QueueKeyMiddleware
+    => new QueueKeyMiddleware($resolver, fallbackToJobId: true),
+```
+
+The header still wins when present, and the key scope (operation identity by default) still
+namespaces the result, so two job types redelivered with the same broker id do not collide.
+
 | Situation | Outcome |
 |---|---|
 | First delivery | The handler runs; the guarantee records the effect (inbox commit / lease + cache) |

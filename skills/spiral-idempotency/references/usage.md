@@ -98,6 +98,16 @@ public function invoke(string $orderId, array $payload): void
 }
 ```
 
+Producers outside the application (a CDC pipeline publishing from a transactional outbox table) set
+no headers. `new QueueKeyMiddleware($resolver, fallbackToJobId: true)` then derives the key from the
+broker job id — the `id` argument of the consume call context. The id identifies one broker message,
+not the operation: same on broker redelivery (crash, missing ack), new when a retry policy re-publishes
+the job or the producer pushes it again; id preservation across a driver's own requeue is
+driver-specific. Deduplicating the operation still needs a payload or header key. The header still wins
+when present; the key scope keeps job types apart. Off by default so a producer that forgot the header
+does not get silent, weaker deduplication. The `transports` stack lists class names, so bind the
+configured instance in a bootloader.
+
 | Situation | Outcome |
 |---|---|
 | First delivery | Handler runs; the guarantee records the effect |
