@@ -18,7 +18,14 @@ with a service *instance* yields a real `ReflectionMethod`), its result MUST be 
 (hence materializing an empty response for a `null` outcome), and its dispatcher scope is `grpc`.
 The bridge is `require-dev` **for tests only**: `tests/Unit/Grpc/BridgeIntegrationTest.php` drives the
 real `Invoker` so a change in any of those assumptions fails a test instead of silently disabling
-idempotency in production. Queue: `spiral/queue`
+idempotency in production.
+
+Events (`src/Events`, `spiral/events`) is the odd transport out: no interceptor, no `transports.*`
+config stack. `EventsIdempotencyBootloader` overrides the `ListenerFactoryInterface` binding (hence
+its `EventsBootloader` dependency — only a later binding wins) with `IdempotentListenerFactory`,
+which wraps each `#[Idempotent]` listener method. The factory, not a dispatcher decorator, is the
+integration point: it is the only place that still knows which listener a closure belongs to, which
+is what a per-listener key needs. Queue: `spiral/queue`
 types appear ONLY in `src/Queue/RetryableLockException` (adapts `Locked` → the native
 `RetryableExceptionInterface` so `RetryPolicyInterceptor` re-enqueues); the key/retry middleware use
 only `spiral/interceptors`. We do NOT reimplement retry/backoff — Spiral's engine owns it.

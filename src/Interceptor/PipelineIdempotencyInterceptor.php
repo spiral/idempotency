@@ -17,6 +17,7 @@ use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\IdempotencyRegistry;
+use Spiral\Idempotency\Internal\IdempotentLocator;
 use Spiral\Idempotency\KeyResolver;
 use Spiral\Idempotency\Pipeline\IdempotencyCall;
 use Spiral\Idempotency\Pipeline\Pipeline;
@@ -240,35 +241,18 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
             return $this->attributes[$cacheKey];
         }
 
-        $resolved = $this->fromReflection($reflection);
-
-        if ($resolved === null && $reflection instanceof \ReflectionMethod) {
-            $class = new \ReflectionClass($this->concreteClass($target) ?? $reflection->getDeclaringClass()->name);
-            do {
-                $resolved = $this->fromReflection($class);
-            } while ($resolved === null && ($class = $class->getParentClass()) !== false);
-        }
+        $resolved = IdempotentLocator::locate(
+            $reflection,
+            $reflection instanceof \ReflectionMethod
+                ? $this->concreteClass($target) ?? $reflection->getDeclaringClass()->name
+                : null,
+        );
 
         if ($cacheKey !== null) {
             $this->attributes[$cacheKey] = $resolved;
         }
 
         return $resolved;
-    }
-
-    /**
-     * @param \ReflectionClass<object>|\ReflectionFunctionAbstract $reflection
-     */
-    private function fromReflection(\ReflectionClass|\ReflectionFunctionAbstract $reflection): ?Idempotent
-    {
-        foreach ($reflection->getAttributes(Idempotent::class, \ReflectionAttribute::IS_INSTANCEOF) as $attribute) {
-            $instance = $attribute->newInstance();
-            \assert($instance instanceof Idempotent);
-
-            return $instance;
-        }
-
-        return null;
     }
 
     /**

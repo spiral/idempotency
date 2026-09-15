@@ -37,7 +37,7 @@ use Spiral\Idempotency\Attribute\Idempotent;
   its mutual exclusion is the row lock of the in-progress INSERT, not a time-bound lease).
 - `failurePolicy` — `FailurePolicy::Cache` (a Domain failure becomes a cached, replayed outcome) or
   `FailurePolicy::Release` (any failure frees the key, the original throwable is rethrown and the next
-  call re-runs). `null` = the transport default: queue `Release`, HTTP/gRPC `Cache`. Lease storages
+  call re-runs). `null` = the transport default: queue and events `Release`, HTTP/gRPC `Cache`. Lease storages
   only — see [`failures-and-gc.md`](failures-and-gc.md).
 - `scope` — key namespace: `null` (default) = per-operation `Class::method` isolation, where the
   class is the **concrete** target, not the one declaring the method; `'name'` = deliberately
@@ -143,6 +143,53 @@ Key from the `idempotency-key` metadata entry (case-insensitive; configurable vi
 Bind `Grpc\DomainFailureMapper` only if the service throws plain domain exceptions
 instead of `GRPCException` — otherwise that mapping happens above the interceptor, too late to be
 cached, and a replay would answer with a different status.
+
+## Events (PSR-14 listeners)
+
+`EventsIdempotencyBootloader` replaces the framework's `ListenerFactoryInterface`, so each
+`#[Idempotent]` listener **method** gets its own key — a fan-out where one listener throws re-runs
+only that one on the next dispatch. No `transports.events` section and no interceptor: events go
+through PSR-14, not a domain core.
+
+Key material, in order: the attribute's `key` path — resolved over the single argument `event`, so it
+starts with that name (`key: 'event.id'`) — otherwise `Events\HasIdempotencyKey::idempotencyKey()` on
+the event. Neither present throws `MissingKeyException`.
+
+```php
+use Spiral\Idempotency\Events\HasIdempotencyKey;
+
+final class OrderPlaced implements HasIdempotencyKey
+{
+    public function __construct(public readonly string $id) {}
+
+    public function idempotencyKey(): string
+    {
+        return $this->id; // the outbox message_id — stable across re-publications
+    }
+}
+
+#[Listener]
+#[Idempotent(storage: 'events')]
+public function charge(OrderPlaced $event): void {}
+```
+
+An application whose events share a base contract adopts the interface once — the base interface
+extends `HasIdempotencyKey` and the shared trait implements `idempotencyKey()` from the id the producer
+already put on the event (see the events section of the README for the shape). Every event using the
+trait is then a valid target for a marked listener without a key path; keep the identity the producer
+preserves, not one regenerated per dispatch.
+
+| Situation | Outcome |
+|---|---|
+| First dispatch | Every marked listener runs under its own key (scope = `ListenerClass::method`) |
+| Re-dispatch | Completed marked listeners are skipped; unmarked ones run again |
+| One listener threw | The dispatcher stops at it; the re-dispatch skips the completed ones and re-runs only the failed one (`FailurePolicy::Release` is the events default) |
+| Concurrent dispatch | `LockedException` propagates untouched — the durable producer owns the retry |
+| No `key` path and no `HasIdempotencyKey` | `MissingKeyException` |
+
+The identity must be the one the producer preserves across re-publications of the same logical event
+(an outbox `message_id`). A value regenerated per dispatch makes every redelivery look new and
+silently disables deduplication.
 
 ## ExactlyOnce contract: write through the transaction
 

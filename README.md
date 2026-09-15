@@ -23,6 +23,9 @@ Optional packages:
   (also needs a PSR-17 factory for the HTTP middleware);
 - `spiral/queue` — the queue/jobs transport (`QueueIdempotencyBootloader`, `QueueKeyMiddleware`,
   `QueueRetryMiddleware`), making consumed jobs idempotent with `Locked → native job retry`;
+- `spiral/events` — the PSR-14 events transport (`EventsIdempotencyBootloader`,
+  `IdempotentListenerFactory`), making individual `#[Listener]` methods idempotent with a per-listener
+  key;
 - `predis/predis` — the default client for the Redis/Valkey lease backend (`RedisLeaseConfig`): AtLeastOnce
   storage over a Redis-compatible server, with server-side TTL (no GC needed) and atomic Lua CAS. Not
   needed when `Driver\Redis\RedisCommands` is bound to an adapter over the app's own Redis client;
@@ -304,6 +307,93 @@ to be cached, and the replay would answer with a different status.
 
 Infrastructure and Bug failures (including a `GRPCException` marked `Retryable`) are never
 snapshotted: they stay exceptions so the key is released and a retry re-runs.
+
+### Events behaviour
+
+The same attribute makes **PSR-14 event listeners** idempotent, one listener method at a time. The
+target is a durable fan-out: an event re-published by an outbox (or dispatched again by a redelivered
+job) reaches several `#[Listener]` methods, and a failure in one of them must not re-run the others.
+
+Register the events bootloader — there is no `transports.events` config section and no interceptor to
+wire, because events are dispatched through PSR-14 rather than through a domain core:
+
+```php
+// Kernel::defineBootloaders()
+\Spiral\Idempotency\Bootloader\EventsIdempotencyBootloader::class,
+```
+
+It replaces the framework's `ListenerFactoryInterface` with `IdempotentListenerFactory`, which wraps
+each marked listener method in its storage. The factory is the integration point on purpose: the
+dispatcher sees only an opaque list of closures, while the factory still knows *which* listener a
+closure belongs to — the identity a per-listener key needs.
+
+Give the event a stable identity by implementing `HasIdempotencyKey`, then mark the listeners:
+
+```php
+use Spiral\Idempotency\Events\HasIdempotencyKey;
+
+final class OrderPlaced implements HasIdempotencyKey
+{
+    public function __construct(public readonly string $id) {} // outbox message_id, not a fresh uuid
+
+    public function idempotencyKey(): string
+    {
+        return $this->id;
+    }
+}
+
+final class PaymentService
+{
+    #[Listener]
+    #[Idempotent(storage: 'events')]
+    public function charge(OrderPlaced $event): void {}
+
+    #[Listener]
+    #[Idempotent(storage: 'events')]
+    public function notify(OrderPlaced $event): void {}
+}
+```
+
+An application whose events already share a base contract adopts the interface once, rather than per
+event class:
+
+```php
+interface DomainEvent extends HasIdempotencyKey {}
+
+trait WithEventId
+{
+    public readonly Uid $id; // the outbox message_id, preserved across re-publications
+
+    public function idempotencyKey(): string
+    {
+        return $this->id->rawValue();
+    }
+}
+```
+
+Every event using the trait is then a valid target for a marked listener without a key path; keep the
+identity the producer preserves, not one regenerated per dispatch.
+
+The key can also come from the attribute's `key` arg-path, resolved over the single argument `event`
+(`key: 'event.id'`) — use it for an event you do not own. An event with neither source throws
+`MissingKeyException`: a listener marked idempotent must not deduplicate on nothing.
+
+| Situation | Outcome |
+|---|---|
+| First dispatch | Every marked listener runs, each under its own key (scope = `ListenerClass::method`) |
+| Re-dispatch of the same event | Each marked listener that completed is skipped; an unmarked one runs again |
+| One listener of the fan-out threw | The dispatcher stops at it (PSR-14 semantics); the re-dispatch skips the listeners that completed and re-runs only the failed one |
+| Concurrent dispatch of the same event | `LockedException` propagates untouched — the durable producer that dispatched the event owns the retry |
+| Event with neither `key` path nor `HasIdempotencyKey` | `MissingKeyException` |
+
+A failing listener **releases** its key (`FailurePolicy::Release` is the events default), which is what
+makes the partial re-run work. Pass `failurePolicy: FailurePolicy::Cache` on the attribute for a
+listener whose failure is a final answer.
+
+> [!IMPORTANT]
+> The event identity must be the one the producer preserves across re-publications of the same logical
+> event — an outbox `message_id`, not a value regenerated per dispatch. A fresh id makes every
+> redelivery look like a new event and silently disables deduplication.
 
 ### The `#[Idempotent]` attribute
 

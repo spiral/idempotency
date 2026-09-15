@@ -12,7 +12,7 @@ declare(strict_types=1);
  *
  * Read-only: prints a report, writes nothing. The report covers:
  *   - relevant installed packages and versions (incl. the cycle/database >= 2.21 requirement);
- *   - which transports (HTTP / queue / gRPC) and storage drivers (Cycle SQL / Redis) are available;
+ *   - which transports (HTTP / queue / gRPC / events) and storage drivers (Cycle SQL / Redis) are available;
  *   - configured database engines (app/config/database.php) and docker-compose DB/Redis services;
  *   - which idempotency bootloaders are already registered and whether the config file exists.
  *
@@ -102,6 +102,7 @@ $interesting = [
     'spiral/queue'             => 'queue transport',
     'spiral/roadrunner-bridge' => 'RoadRunner dispatchers (queue/gRPC scopes)',
     'spiral/roadrunner-grpc'   => 'gRPC transport',
+    'spiral/events'            => 'PSR-14 events transport',
     'predis/predis'            => 'default client for the Redis/Valkey lease backend (RedisLeaseConfig)',
     'psr/http-message'         => 'HTTP transport (PSR-7)',
     'psr/http-factory'         => 'HTTP transport (PSR-17, response snapshots)',
@@ -124,6 +125,7 @@ $line = static fn(bool $ok, string $what, string $why) => \printf("  [%s] %-14s 
 $line($has('psr/http-message') && $has('psr/http-factory'), 'HTTP', 'HttpIdempotencyBootloader + transports.http');
 $line($has('spiral/queue'), 'Queue', 'QueueIdempotencyBootloader + transports.queue (consume interceptor)');
 $line($has('spiral/roadrunner-grpc') && $has('spiral/roadrunner-bridge'), 'gRPC', 'GrpcIdempotencyBootloader + transports.grpc');
+$line($has('spiral/events'), 'Events', 'EventsIdempotencyBootloader (no transports entry — PSR-14, no interceptor)');
 $line($has('cycle/database'), 'Cycle SQL', 'CycleLeaseConfig / CycleInboxConfig / CycleAtMostOnceConfig');
 $redisClient = match (true) {
     $has('predis/predis') => 'predis/predis found: bind \\Predis\\ClientInterface',
@@ -171,6 +173,7 @@ $bootloaders = [
     'HttpIdempotencyBootloader',
     'QueueIdempotencyBootloader',
     'GrpcIdempotencyBootloader',
+    'EventsIdempotencyBootloader',
     'CycleSchemaBootloader',
 ];
 $hits = grepFiles("$root/app/src", $bootloaders);
