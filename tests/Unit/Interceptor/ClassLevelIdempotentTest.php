@@ -10,6 +10,7 @@ use Spiral\Idempotency\Config\IdempotencyConfig;
 use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\Interceptor\PipelineIdempotencyInterceptor;
+use Spiral\Idempotency\Internal\Key\DefaultArgumentKeyResolver;
 use Spiral\Idempotency\Internal\Key\DefaultKeyResolver;
 use Spiral\Idempotency\Tests\Unit\Stub\RecordingHandler;
 use Spiral\Idempotency\Tests\Unit\Stub\RecordingIdempotency;
@@ -109,7 +110,14 @@ final class ClassLevelIdempotentTest
             'transports' => ['queue' => []],
         ]);
 
-        return new PipelineIdempotencyInterceptor($registry, new DefaultKeyResolver(), $container, $config, 'queue');
+        return new PipelineIdempotencyInterceptor(
+            $registry,
+            new DefaultKeyResolver(),
+            new DefaultArgumentKeyResolver(),
+            $container,
+            $config,
+            'queue',
+        );
     }
 
     /**

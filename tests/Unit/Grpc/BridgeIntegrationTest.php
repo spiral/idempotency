@@ -16,6 +16,7 @@ use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\Idempotency;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\Interceptor\PipelineIdempotencyInterceptor;
+use Spiral\Idempotency\Internal\Key\DefaultArgumentKeyResolver;
 use Spiral\Idempotency\Internal\Key\DefaultKeyResolver;
 use Spiral\Idempotency\Internal\Lease\DefaultLeaseManager;
 use Spiral\Idempotency\Internal\Lease\LeaseIdempotency;
@@ -111,6 +112,7 @@ final class BridgeIntegrationTest
         $interceptor = new PipelineIdempotencyInterceptor(
             $registry,
             new DefaultKeyResolver(),
+            new DefaultArgumentKeyResolver(),
             $container,
             $config,
             transport: 'grpc',

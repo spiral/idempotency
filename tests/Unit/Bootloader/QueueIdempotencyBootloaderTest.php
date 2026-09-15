@@ -13,6 +13,8 @@ use Spiral\Idempotency\Exception\MisconfigurationException;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\Interceptor\PipelineIdempotencyInterceptor;
 use Spiral\Idempotency\Interceptor\IdempotencyInterceptor;
+use Spiral\Idempotency\ArgumentKeyResolver;
+use Spiral\Idempotency\Internal\Key\DefaultArgumentKeyResolver;
 use Spiral\Idempotency\Internal\Key\DefaultKeyResolver;
 use Spiral\Idempotency\KeyResolver;
 use Spiral\Interceptors\Context\CallContext;
@@ -43,6 +45,7 @@ final class QueueIdempotencyBootloaderTest
         $container = new Container();
         $container->bindSingleton(IdempotencyRegistry::class, new IdempotencyRegistry());
         $container->bindSingleton(KeyResolver::class, new DefaultKeyResolver());
+        $container->bindSingleton(ArgumentKeyResolver::class, new DefaultArgumentKeyResolver());
         $container->bindSingleton(IdempotencyConfig::class, new IdempotencyConfig([
             'transports' => ['queue' => []],
         ]));

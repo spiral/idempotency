@@ -97,5 +97,7 @@ TTLs, an expired lease simply vanishes.
   `unserialize()` on blobs read back from the tables — the table/keyspace is the trust boundary;
   with multiple writers, bind a JSON serializer and keep results JSON-safe.
 - **Classifier** — bind `FailureClassifier`.
-- **Key policy** — bind `KeyResolver` (normalization, hashing, hierarchy composition).
+- **Key policy** — bind `KeyResolver` (normalization, hashing, hierarchy composition), or
+  `ArgumentKeyResolver` (how the attribute's `key` dot-path is walked and which leaf types have a
+  string form).
 - **Schema** — ORM role names via `SchemaNaming`; table names live in the storage configs.

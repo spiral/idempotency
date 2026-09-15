@@ -23,6 +23,7 @@ use Spiral\Idempotency\Http\HttpOutcomeMiddleware;
 use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\Interceptor\PipelineIdempotencyInterceptor;
+use Spiral\Idempotency\Internal\Key\DefaultArgumentKeyResolver;
 use Spiral\Idempotency\Internal\Key\DefaultKeyResolver;
 use Spiral\Idempotency\Internal\Lease\LeaseIdempotency;
 use Spiral\Idempotency\Internal\Lease\DefaultLeaseManager;
@@ -38,6 +39,16 @@ use Spiral\Interceptors\HandlerInterface;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Test;
+
+final class StringableUid implements \Stringable
+{
+    public function __construct(private readonly string $value) {}
+
+    public function __toString(): string
+    {
+        return $this->value;
+    }
+}
 
 final class AnnotatedFixture
 {
@@ -55,6 +66,12 @@ final class AnnotatedFixture
 
     #[Idempotent(storage: 'http', key: 'nope')]
     public function unresolvableKey(string $other): ResponseInterface
+    {
+        throw new \LogicException('Not invoked directly.');
+    }
+
+    #[Idempotent(storage: 'http', key: 'payload.id')]
+    public function withObjectKey(object $payload): ResponseInterface
     {
         throw new \LogicException('Not invoked directly.');
     }
@@ -278,7 +295,14 @@ final class PipelineIdempotencyInterceptorTest
             'transports' => ['http' => $stack ?? [HttpOutcomeMiddleware::class, HttpKeyMiddleware::class]],
         ]);
 
-        return new PipelineIdempotencyInterceptor($registry, new DefaultKeyResolver(), $container, $config, 'http');
+        return new PipelineIdempotencyInterceptor(
+            $registry,
+            new DefaultKeyResolver(),
+            new DefaultArgumentKeyResolver(),
+            $container,
+            $config,
+            'http',
+        );
     }
 
     /**
@@ -417,6 +441,45 @@ final class PipelineIdempotencyInterceptorTest
         Assert::same($handler->calls, 0);
     }
 
+    public function resolvesKeyFromStringableArgument(): void
+    {
+        $interceptor = $this->interceptor();
+        $handler = new CountingHandler($this->psr17);
+
+        // Domain ids are value objects, not strings: the arg-path must stringify them rather than
+        // treat the endpoint as misconfigured.
+        $payload = new \stdClass();
+        $payload->id = new StringableUid('uid-7');
+
+        /** @var ResponseInterface $first */
+        $first = $interceptor->intercept($this->context('withObjectKey', ['payload' => $payload]), $handler);
+        /** @var ResponseInterface $second */
+        $second = $interceptor->intercept($this->context('withObjectKey', ['payload' => $payload]), $handler);
+
+        Assert::same($handler->calls, 1);
+        Assert::same($first->getHeaderLine('Idempotency-Key'), AnnotatedFixture::class . '::withObjectKey:uid-7');
+        Assert::same($second->getHeaderLine('Idempotency-Replay'), 'true');
+    }
+
+    public function argumentWithoutStringFormStillFailsFast(): void
+    {
+        $interceptor = $this->interceptor();
+        $handler = new CountingHandler($this->psr17);
+
+        $payload = new \stdClass();
+        $payload->id = ['nested' => 'array'];
+
+        $thrown = null;
+        try {
+            $interceptor->intercept($this->context('withObjectKey', ['payload' => $payload]), $handler);
+        } catch (MisconfigurationException $e) {
+            $thrown = $e;
+        }
+
+        Assert::notNull($thrown);
+        Assert::same($handler->calls, 0);
+    }
+
     public function thrownReplayableFailureReplaysSameClassOverHttp(): void
     {
         $interceptor = $this->interceptor();
@@ -527,7 +590,14 @@ final class PipelineIdempotencyInterceptorTest
         $config = new IdempotencyConfig([
             'transports' => ['http' => [HttpOutcomeMiddleware::class, HttpKeyMiddleware::class]],
         ]);
-        $interceptor = new PipelineIdempotencyInterceptor($registry, new DefaultKeyResolver(), $container, $config, 'http');
+        $interceptor = new PipelineIdempotencyInterceptor(
+            $registry,
+            new DefaultKeyResolver(),
+            new DefaultArgumentKeyResolver(),
+            $container,
+            $config,
+            'http',
+        );
 
         $handler = new class($this->psr17) implements HandlerInterface {
             public bool $contextVisible = false;
@@ -753,7 +823,14 @@ final class PipelineIdempotencyInterceptorTest
         $config = new IdempotencyConfig([
             'transports' => ['http' => [HttpOutcomeMiddleware::class, HttpKeyMiddleware::class]],
         ]);
-        $interceptor = new PipelineIdempotencyInterceptor($registry, new DefaultKeyResolver(), $container, $config, 'http');
+        $interceptor = new PipelineIdempotencyInterceptor(
+            $registry,
+            new DefaultKeyResolver(),
+            new DefaultArgumentKeyResolver(),
+            $container,
+            $config,
+            'http',
+        );
         $handler = new FailingHandler(new PlainDeclineStub('declined'));
 
         /** @var ResponseInterface $response */
