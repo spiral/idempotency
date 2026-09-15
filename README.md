@@ -107,6 +107,16 @@ return [
 ];
 ```
 
+Storage drivers available under `storages`:
+
+| Config                                | Guarantee   | Backend                                                                                                |
+|---------------------------------------|-------------|--------------------------------------------------------------------------------------------------------|
+| `Driver\Cycle\CycleLeaseConfig`       | AtLeastOnce | Lease table over a Cycle DBAL connection                                                                 |
+| `Driver\Cycle\CycleInboxConfig`       | ExactlyOnce | Inbox table; the record and the side-effect commit in one transaction                                    |
+| `Driver\Cycle\CycleAtMostOnceConfig`  | AtMostOnce  | Dedup-guard table                                                                                        |
+| `Driver\Redis\RedisLeaseConfig`       | AtLeastOnce | Redis/Valkey hash with server-side TTL — no GC needed                                                    |
+| `Driver\Memory\MemoryLeaseConfig`     | AtLeastOnce | Per-process PHP array. Dedup holds only inside the worker that acquired the lease and dies with it — for tests and local development, not for production traffic |
+
 Add **one line** to your existing domain-core interceptor list — reference the
 `IdempotencyInterceptor` alias, not a concrete class:
 
