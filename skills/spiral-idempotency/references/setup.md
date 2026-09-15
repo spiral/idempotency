@@ -17,7 +17,7 @@ It reports:
 
 - installed packages relevant to idempotency (and whether `cycle/database` satisfies the
   `>= 2.21` requirement for the upsert dedup);
-- which transports the project can use (HTTP / queue / gRPC) based on installed packages;
+- which transports the project can use (HTTP / queue / gRPC / events) based on installed packages;
 - which database engines are configured (`app/config/database.php`: Postgres / MySQL / SQLite),
   and whether docker-compose declares a `redis`/`valkey` service for the Redis lease;
 - which idempotency bootloaders are already registered and whether
@@ -36,6 +36,7 @@ Decide from the report:
 | A Redis client is present (`predis/predis`, `ext-redis`, any other) or a Redis service exists | `RedisLeaseConfig` is available for AtLeastOnce (no GC needed); a non-predis client needs a `Driver\Redis\RedisCommands` adapter binding |
 | `spiral/queue` present | The queue transport applies (`QueueIdempotencyBootloader`) |
 | `spiral/roadrunner-bridge` + `spiral/roadrunner-grpc` present | The gRPC transport applies (`GrpcIdempotencyBootloader`) |
+| `spiral/events` present | The PSR-14 events transport applies (`EventsIdempotencyBootloader`) — no `transports.events` config section, no interceptor |
 | `spiral/cycle-bridge` present | `CycleSchemaBootloader` can put the tables into the ORM schema (`cycle:sync`/`cycle:migrate`) |
 
 ## 1. Install
@@ -48,8 +49,8 @@ composer require spiral/idempotency
 
 That is the **only** package you may install on your own. Optional peers — `cycle/database`
 (bundled SQL driver), `spiral/interceptors` (the attribute path), `spiral/queue` (queue
-transport), `predis/predis` (Redis lease when the app has no Redis client to adapt), `spiral/cycle-bridge`
-(tables in the ORM schema) —
+transport), `spiral/events` (PSR-14 listeners), `predis/predis` (Redis lease when the app has no Redis
+client to adapt), `spiral/cycle-bridge` (tables in the ORM schema) —
 are architecture decisions: if step 0 shows one is missing but needed, **ask the user for
 approval before installing it**; never `composer require` them unprompted.
 
@@ -61,6 +62,7 @@ approval before installing it**; never `composer require` them unprompted.
 \Spiral\Idempotency\Bootloader\HttpIdempotencyBootloader::class,
 \Spiral\Idempotency\Bootloader\QueueIdempotencyBootloader::class,
 \Spiral\Idempotency\Bootloader\GrpcIdempotencyBootloader::class,
+\Spiral\Idempotency\Bootloader\EventsIdempotencyBootloader::class,
 \Spiral\Idempotency\Bootloader\CycleSchemaBootloader::class,
 ```
 
@@ -68,6 +70,11 @@ approval before installing it**; never `composer require` them unprompted.
 project actually dispatches — each one binds a transport-flavored interceptor in its own
 dispatcher scope (`http` / `queue` / `grpc`) — and `CycleSchemaBootloader` only when the tables
 go through `cycle:sync`/`cycle:migrate` (step 5, rung 1).
+
+`EventsIdempotencyBootloader` is the odd one out: it binds no interceptor and needs no
+`transports.events` entry. It replaces the framework's `ListenerFactoryInterface` so every
+`#[Idempotent]` listener method gets its own key, and declares `EventsBootloader` as a dependency to
+guarantee it registers after it.
 
 ## 3. Config — `app/config/idempotency.php`
 
@@ -99,7 +106,8 @@ Rules for the `transports` section (uncomment/add the entries for the project):
 
 - **Every transport whose bootloader is registered must have an entry** — `[]` is valid (the key
   then comes only from the attribute), but a *missing* one throws `MisconfigurationException` on
-  the first `#[Idempotent]` call.
+  the first `#[Idempotent]` call. The events transport is the exception: it runs no middleware
+  stack, so it has no entry at all.
 - **Middleware with constructor options** (a custom header name, `QueueKeyMiddleware`'s
   `fallbackToJobId: true` — see the queue section of `usage.md`) are bound as configured instances in
   a bootloader: the stack lists class names and resolves each through the container.

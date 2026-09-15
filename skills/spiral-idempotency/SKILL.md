@@ -1,6 +1,6 @@
 ---
 name: spiral-idempotency
-description: "Set up and use the spiral/idempotency package — protect HTTP endpoints, queue jobs, and gRPC methods from duplicated side-effects on retries. Use when adding #[Idempotent] to a handler, configuring app/config/idempotency.php, choosing between AtLeastOnce / AtMostOnce / ExactlyOnce guarantees, wiring IdempotencyInterceptor into a domain core, handling Idempotency-Key headers, or debugging replayed responses / LockedException / MissingKeyException. Trigger on \"idempotent\", \"idempotency key\", \"deduplicate requests/jobs\", \"exactly once\", \"response replay\", \"transactional inbox\"."
+description: "Set up and use the spiral/idempotency package — protect HTTP endpoints, queue jobs, gRPC methods, and PSR-14 event listeners from duplicated side-effects on retries. Use when adding #[Idempotent] to a handler, configuring app/config/idempotency.php, choosing between AtLeastOnce / AtMostOnce / ExactlyOnce guarantees, wiring IdempotencyInterceptor into a domain core, handling Idempotency-Key headers, or debugging replayed responses / LockedException / MissingKeyException. Trigger on \"idempotent\", \"idempotency key\", \"deduplicate requests/jobs\", \"exactly once\", \"response replay\", \"transactional inbox\"."
 ---
 
 # spiral/idempotency — setup and usage
@@ -31,7 +31,7 @@ optional packages, bootloaders, and storage drivers:
 php <this-skill-dir>/scripts/inspect-environment.php --root=.
 ```
 
-**Using** (marking a handler idempotent over HTTP / queue / gRPC, the ExactlyOnce transactional
+**Using** (marking a handler idempotent over HTTP / queue / gRPC / events, the ExactlyOnce transactional
 contract, the programmatic API, long-running operations) → read
 [`references/usage.md`](references/usage.md). Before writing `#[Idempotent(storage: ...)]`,
 list the aliases and guarantees the project actually declares:
@@ -51,13 +51,16 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
 
 - Reference `IdempotencyInterceptor` (alias), never the concrete `PipelineIdempotencyInterceptor`.
 - Every registered transport bootloader needs its `transports.<name>` entry in config — `[]` is
-  valid, a missing one throws on the first `#[Idempotent]` call.
+  valid, a missing one throws on the first `#[Idempotent]` call. Events are the exception: no
+  interceptor, no config entry.
 - Outcome middleware outer, key middleware inner in every `transports.<name>` list.
 - Queue: `RetryPolicyInterceptor` must stay outer of the idempotency interceptor on consume.
 - A handler whose entry point is inherited (an abstract `handle()`) carries `#[Idempotent]` on the
   **class**; it then covers every method the transport dispatches to on that class — on a
   controller, every action. A method attribute wins over a class one, a subclass over its base.
 - Inbox = `TransactionMode::Exclusive`: no surrounding transaction around the handler.
+- Events: the event's `HasIdempotencyKey` must return the producer's stable id (an outbox
+  `message_id`), never a value regenerated per dispatch.
 - ExactlyOnce holds only for writes through `CycleContext` — any external effect degrades it to
   AtLeastOnce.
 - Default `PhpSerializer` runs `unserialize()` on replay — the idempotency table/keyspace is the
