@@ -26,8 +26,10 @@ its `EventsBootloader` dependency — only a later binding wins) with `Idempoten
 which wraps each `#[Idempotent]` listener method. The factory, not a dispatcher decorator, is the
 integration point: it is the only place that still knows which listener a closure belongs to, which
 is what a per-listener key needs. Queue: `spiral/queue`
-types appear ONLY in `src/Queue/RetryableLockException` (adapts `Locked` → the native
-`RetryableExceptionInterface` so `RetryPolicyInterceptor` re-enqueues); the key/retry middleware use
+types appear only in `src/Queue/RetryableLockException` (adapts `Locked` → the native
+`RetryableExceptionInterface` so `RetryPolicyInterceptor` re-enqueues) and in
+`Internal\Pipeline\DefaultFailureClassifier`, which reads that same `RetryableExceptionInterface`
+behind an `interface_exists()` guard because it runs on every transport; the key/retry middleware use
 only `spiral/interceptors`. We do NOT reimplement retry/backoff — Spiral's engine owns it.
 
 ## Shipped AI skill — keep it in sync

@@ -15,9 +15,10 @@ use Spiral\Queue\RetryPolicyInterface;
  * lock TTL instead of dead-lettering it. This is the queue analog of the HTTP `409 Conflict` +
  * `Retry-After` response produced by {@see \Spiral\Idempotency\Http\HttpOutcomeMiddleware}.
  *
- * This is the ONLY class in the library that touches `spiral/queue` types — the decoupling invariant
- * (the transport package is a `require-dev` + `suggest`, never forced on the core) is preserved by
- * keeping the queue coupling confined here.
+ * The decoupling invariant (the transport package is a `require-dev` + `suggest`, never forced on the
+ * core) holds because this class is only ever loaded from the queue transport. The one other place
+ * that names a `spiral/queue` type, {@see \Spiral\Idempotency\Internal\Pipeline\DefaultFailureClassifier},
+ * guards it with `interface_exists()` instead, because it runs on every transport.
  *
  * @api
  */

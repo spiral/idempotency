@@ -8,9 +8,15 @@ customize the mapping.
 
 | Kind | Default mapping | Lease reaction |
 |---|---|---|
-| **Domain** | any other `\Exception` | Cached as a valid negative outcome, replayed on retry |
-| **Infrastructure** | `\Error`, or `\Exception` implementing `Retryable` | Key released; the transport/client retries |
+| **Domain** | any other `\Exception`, or a `RetryableExceptionInterface` that is **not** retryable | Cached as a valid negative outcome, replayed on retry |
+| **Infrastructure** | `\Error`, `\Exception` implementing `Retryable`, or a retryable `RetryableExceptionInterface` | Key released; the transport/client retries |
 | **Bug** | only via explicit config: `DefaultFailureClassifier(bugExceptions: [...])` | Key released; no re-enqueue — report and fix |
+
+`RetryableExceptionInterface` is `spiral/queue`'s own retry contract: a job exception that already
+states its retry intent for the broker is read the same way here, so it needs no second marker. The
+rule is skipped when `spiral/queue` is not installed. It is checked **before** the `\Error` rule, so an
+`\Error` implementing the contract follows `isRetryable()` rather than its type — the one combination
+whose classification changed in 0.4.
 
 ## Failure policy (`Cache` vs `Release`)
 
