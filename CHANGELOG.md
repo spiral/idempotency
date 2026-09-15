@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.4.0](https://github.com/spiral/idempotency/compare/0.3.0...0.4.0) (2026-09-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* **failure:** the queue contract is read before the `\Error` rule, so an `\Error` that implements `RetryableExceptionInterface` with `isRetryable() === false` is now Domain (cached and replayed) where it used to be Infrastructure (key released). No other input changes kind; an app relying on the old result must bind its own FailureClassifier.
+* **failure:** queue now defaults to Release, so a failed job frees its key and the broker's redelivery re-runs the handler instead of replaying a cached failure — previously that took wrapping every failure into a retryable exception. HTTP, gRPC and a direct execute() stay on Cache.
+* **key:** reject a boolean leaf in the argument key path
+* **key:** extract the attribute arg-path into ArgumentKeyResolver
+* **attribute:** for a target whose method is inherited, the default key scope changes from `Declaring::method` to `Concrete::method` on every transport, an HTTP controller inheriting an action included. Keys written under the old scope no longer match, so a replay begun before the upgrade re-runs the operation instead of replaying it; drain those in-flight keys before deploying, or pin the old key space with an explicit `scope:` on the attribute.
+
+### Features
+
+* **attribute:** allow #[Idempotent] on classes ([4f247c2](https://github.com/spiral/idempotency/commit/4f247c2e82554e1d20ccb8a7b564ae4ce9e19e60))
+* **events:** idempotent PSR-14 listeners via IdempotentListenerFactory ([a497870](https://github.com/spiral/idempotency/commit/a497870c51b9a61d6d93ed0d99064a9ee1b8db48))
+* **failure:** honour the queue retry contract in the default classifier ([02ad947](https://github.com/spiral/idempotency/commit/02ad947ef673878d25119cf64439f25b87a2e5cf))
+* **failure:** per-operation FailurePolicy (Cache / Release) ([1fc048a](https://github.com/spiral/idempotency/commit/1fc048a61411297f560d3cbe760f4566c320a01d))
+* **key:** extract the attribute arg-path into ArgumentKeyResolver ([d27c8a7](https://github.com/spiral/idempotency/commit/d27c8a7c2ed19ff6641eb08c739ee40ba198bc8a))
+* **memory:** public MemoryLeaseConfig for a process-local lease ([bba229e](https://github.com/spiral/idempotency/commit/bba229e4a5a5034efc3b0dd72979fa67ad732843))
+* **queue:** optional job-id fallback for the key ([f70928a](https://github.com/spiral/idempotency/commit/f70928acd60107a265ea80a1d21c01848965bc25))
+
+
+### Bug Fixes
+
+* **key:** reject a boolean leaf in the argument key path ([3b0c98e](https://github.com/spiral/idempotency/commit/3b0c98ebf60091048fc78a7b67d411aaf22843b8))
+
+
+### Documentation
+
+* **config:** the transports section is optional, its named stacks are not ([2e74057](https://github.com/spiral/idempotency/commit/2e740577e98cc14b65c2cff90e3896216839a1b9))
+
+
+### Code Refactoring
+
+* **attribute:** extract the Idempotent lookup into IdempotentLocator ([a497870](https://github.com/spiral/idempotency/commit/a497870c51b9a61d6d93ed0d99064a9ee1b8db48))
+
 ## [0.3.0](https://github.com/spiral/idempotency/compare/0.2.1...0.3.0) (2026-09-03)
 
 
