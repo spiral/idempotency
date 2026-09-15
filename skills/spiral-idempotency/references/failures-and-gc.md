@@ -112,7 +112,7 @@ worst expected redelivery delay.
 
 Scheduling the GC (cron, `spiral/scheduler`, a console command) is the application's policy — the
 package does not run it by itself. The Redis lease needs no GC: server-side `EXPIRE` carries both
-TTLs, an expired lease simply vanishes.
+TTLs, an expired lease simply vanishes; the in-memory lease prunes expired records on read.
 
 ## Customization points
 

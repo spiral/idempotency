@@ -12,7 +12,7 @@ declare(strict_types=1);
  *
  * Read-only: prints a report, writes nothing. The report covers:
  *   - relevant installed packages and versions (incl. the cycle/database >= 2.21 requirement);
- *   - which transports (HTTP / queue / gRPC / events) and storage drivers (Cycle SQL / Redis) are available;
+ *   - which transports (HTTP / queue / gRPC / events) and storage drivers (Cycle SQL / Redis / in-memory) are available;
  *   - configured database engines (app/config/database.php) and docker-compose DB/Redis services;
  *   - which idempotency bootloaders are already registered and whether the config file exists.
  *
@@ -133,6 +133,7 @@ $redisClient = match (true) {
     default => 'no Redis client found: bind RedisCommands to an adapter over the app\'s client, or install predis/predis',
 };
 $line($has('predis/predis') || \extension_loaded('redis'), 'Redis lease', "RedisLeaseConfig (AtLeastOnce only) — {$redisClient}");
+$line(true, 'Memory lease', 'MemoryLeaseConfig (AtLeastOnce, process-local) — no dependency; tests and local development only');
 
 // ---- Config files -----------------------------------------------------------------------------
 echo "\n## Config files\n";
