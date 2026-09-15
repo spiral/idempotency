@@ -19,8 +19,9 @@ interface ArgumentKeyResolver
     /**
      * @param array<array-key, mixed> $arguments call arguments to walk
      * @param string $path dot-notation path over arrays and object properties
-     * @return string|null null when the path leads nowhere, or to a value with no string form; an empty
-     *         string is a resolved but blank value, which {@see KeyResolver} rejects as unusable material
+     * @return string|null null when the path leads nowhere, or to a value with no meaningful string form
+     *         (array, plain object, null, bool); an empty string is a resolved but blank value, which
+     *         {@see KeyResolver} rejects as unusable material
      */
     public function resolve(array $arguments, string $path): ?string;
 }

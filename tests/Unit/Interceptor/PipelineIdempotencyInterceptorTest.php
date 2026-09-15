@@ -446,8 +446,6 @@ final class PipelineIdempotencyInterceptorTest
         $interceptor = $this->interceptor();
         $handler = new CountingHandler($this->psr17);
 
-        // Domain ids are value objects, not strings: the arg-path must stringify them rather than
-        // treat the endpoint as misconfigured.
         $payload = new \stdClass();
         $payload->id = new StringableUid('uid-7');
 

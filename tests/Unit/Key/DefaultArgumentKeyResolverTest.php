@@ -80,7 +80,12 @@ final class DefaultArgumentKeyResolverTest
     {
         Assert::same($this->resolve(['n' => 42], 'n'), '42');
         Assert::same($this->resolve(['n' => 1.5], 'n'), '1.5');
-        Assert::same($this->resolve(['n' => true], 'n'), '1');
+    }
+
+    public function rejectsBooleanLeaf(): void
+    {
+        Assert::null($this->resolve(['flag' => true], 'flag'));
+        Assert::null($this->resolve(['flag' => false], 'flag'));
     }
 
     public function rejectsPureEnumLeaf(): void
