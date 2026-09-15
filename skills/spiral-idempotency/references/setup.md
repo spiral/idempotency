@@ -105,6 +105,8 @@ return [
 
 Rules for the `transports` section (uncomment/add the entries for the project):
 
+- **The section itself is optional** — a project that only calls `IdempotencyRegistry::execute()`
+  and registers no transport bootloader omits it; an absent section reads as empty.
 - **Every transport whose bootloader is registered must have an entry** — `[]` is valid (the key
   then comes only from the attribute), but a *missing* one throws `MisconfigurationException` on
   the first `#[Idempotent]` call. The events transport is the exception: it runs no middleware

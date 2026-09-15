@@ -22,9 +22,22 @@ final class IdempotencyConfigTest
         Assert::same($config->getDefault(), 'notifications');
     }
 
+    public function omittedTransportsSectionIsEmpty(): void
+    {
+        // An app driving IdempotencyRegistry::execute() directly registers no transport bootloader and
+        // has nothing to declare: the section must be optional, not a `'transports' => []` ritual.
+        $config = new IdempotencyConfig(['default' => 'payments', 'storages' => []]);
+
+        Assert::same($config->getDefault(), 'payments');
+
+        Expect::exception(MisconfigurationException::class)->withMessageContaining('transports.queue');
+
+        $config->getTransport('queue');
+    }
+
     public function unknownTransportThrows(): void
     {
-        // A missing transport section is a misconfiguration (typo / bootloader enabled without config),
+        // A missing transport stack is a misconfiguration (typo / bootloader enabled without config),
         // not an empty pipeline — it must fail fast with a message naming the config path to add.
         $config = new IdempotencyConfig(['transports' => ['queue' => []]]);
 

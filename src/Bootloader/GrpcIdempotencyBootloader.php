@@ -45,10 +45,12 @@ use Spiral\Idempotency\KeyResolver;
  * {@see \Spiral\Idempotency\Grpc\DomainFailureMapper} when the service expresses negative outcomes
  * as plain domain exceptions instead of gRPC statuses; see {@see \Spiral\Idempotency\Grpc\GrpcOutcomeMiddleware}.
  *
- * The app MUST declare `transports.grpc` — at least as an empty list. A missing section is treated as a
- * misconfiguration: {@see IdempotencyConfig::getTransport()} throws {@see MisconfigurationException} on
- * the first `#[Idempotent]` call rather than running an empty pipeline that silently disables
- * idempotency. An explicit `'grpc' => []` is valid (key comes only from the attribute, no gRPC middleware).
+ * Registering this bootloader makes `transports.grpc` mandatory — at least as an empty list. A missing
+ * stack is treated as a misconfiguration: {@see IdempotencyConfig::getTransport()} throws
+ * {@see MisconfigurationException} on the first `#[Idempotent]` call rather than running an empty
+ * pipeline that silently disables idempotency. An explicit `'grpc' => []` is valid (key comes only from
+ * the attribute, no gRPC middleware); the `transports` section as a whole stays optional for an app that
+ * registers no transport bootloader at all.
  *
  * @api
  */

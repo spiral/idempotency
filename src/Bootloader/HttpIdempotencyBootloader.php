@@ -46,11 +46,12 @@ use Spiral\Idempotency\KeyResolver;
  * to the first attempt. Unbound (default), such failures are rethrown and the replay may render
  * differently; see {@see \Spiral\Idempotency\Http\HttpOutcomeMiddleware}.
  *
- * The app MUST declare `transports.http` — at least as an empty list. A missing section is treated as a
- * misconfiguration: {@see IdempotencyConfig::getTransport()} throws
+ * Registering this bootloader makes `transports.http` mandatory — at least as an empty list. A missing
+ * stack is treated as a misconfiguration: {@see IdempotencyConfig::getTransport()} throws
  * {@see MisconfigurationException} on the first `#[Idempotent]` call rather
  * than running an empty pipeline that silently disables idempotency. An explicit `'http' => []` is valid
- * (key comes only from the attribute, no HTTP middleware).
+ * (key comes only from the attribute, no HTTP middleware); the `transports` section as a whole stays
+ * optional for an app that registers no transport bootloader at all.
  *
  * @api
  */

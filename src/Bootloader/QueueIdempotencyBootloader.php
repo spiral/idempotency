@@ -42,11 +42,12 @@ use Spiral\Idempotency\KeyResolver;
  * `RetryPolicyInterceptor` should sit OUTER of ours so it catches the re-thrown
  * {@see \Spiral\Idempotency\Queue\RetryableLockException} and re-enqueues the job.
  *
- * The app MUST declare `transports.queue` — at least as an empty list. A missing section is treated as a
- * misconfiguration: {@see IdempotencyConfig::getTransport()} throws {@see MisconfigurationException} on
- * the first `#[Idempotent]` call rather than running an empty pipeline that silently disables
- * idempotency. An explicit `'queue' => []` is valid (key comes only from the attribute, no queue
- * middleware).
+ * Registering this bootloader makes `transports.queue` mandatory — at least as an empty list. A missing
+ * stack is treated as a misconfiguration: {@see IdempotencyConfig::getTransport()} throws
+ * {@see MisconfigurationException} on the first `#[Idempotent]` call rather than running an empty
+ * pipeline that silently disables idempotency. An explicit `'queue' => []` is valid (key comes only from
+ * the attribute, no queue middleware); the `transports` section as a whole stays optional for an app
+ * that registers no transport bootloader at all.
  *
  * @api
  */
