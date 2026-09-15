@@ -33,10 +33,38 @@ use Spiral\Idempotency\Attribute\Idempotent;
   (HTTP header/field, job header, gRPC metadata). A path resolving to nothing fails fast.
 - `lockTtl` / `ttl` — per-operation overrides (lockTtl: lease driver only; the inbox ignores it —
   its mutual exclusion is the row lock of the in-progress INSERT, not a time-bound lease).
-- `scope` — key namespace: `null` (default) = per-operation `Class::method` isolation;
-  `'name'` = deliberately shared across endpoints (e.g. an HTTP endpoint and a queue job that are
-  the same logical operation); `Idempotent::SCOPE_GLOBAL` = no namespacing, the client owns
-  global uniqueness.
+- `scope` — key namespace: `null` (default) = per-operation `Class::method` isolation, where the
+  class is the **concrete** target, not the one declaring the method; `'name'` = deliberately
+  shared across endpoints (e.g. an HTTP endpoint and a queue job that are the same logical
+  operation); `Idempotent::SCOPE_GLOBAL` = no namespacing, the client owns global uniqueness.
+
+### Method or class
+
+The attribute targets a method **or** a class. On a class it covers **every** method the transport
+dispatches to on that class — including ones inherited from an abstract base, the only way to
+annotate a handler that never redeclares its entry point. On a job handler that is the single
+`handle()`; on a controller every action becomes idempotent under the one storage alias. Resolution
+takes the first hit of: the dispatched method, the concrete class, then its parents nearest-first. A
+method attribute therefore beats a class one, and a subclass beats its base.
+
+```php
+abstract class JobHandler
+{
+    public function handle(string $name, string $id, mixed $payload, array $headers = []): void
+    {
+        // implemented once; subclasses only implement invoke()
+    }
+}
+
+#[Idempotent(storage: 'jobs')] // key from the job header — no method of its own to mark
+final class DispatchEvent extends JobHandler
+{
+    public function invoke(mixed $payload): void {}
+}
+```
+
+Sibling subclasses sharing one inherited `handle()` still get one key space each, because the
+default scope names the concrete class.
 
 ## HTTP
 

@@ -229,6 +229,14 @@ For transient **failure** retries (infra errors), compose Spiral's own `#[RetryP
 the handler alongside `#[Idempotent]` — the two are orthogonal: idempotency dedups the effect, the
 retry policy governs re-delivery.
 
+A job whose entry point lives on an abstract base — the common "`handle()` implemented once, subclasses
+implement `invoke()`" shape — annotates the **class** instead; there is no method of its own to mark:
+
+```php
+#[Idempotent(storage: 'orders')] // key from the job header
+final class DispatchEvent extends JobHandler {} // handle() is inherited from JobHandler
+```
+
 ### gRPC behaviour
 
 The same interceptor makes **gRPC service methods** idempotent. Register the gRPC bootloader, list the
@@ -288,14 +296,29 @@ snapshotted: they stay exceptions so the key is released and a retry re-runs.
 | `ttl`     | Override of the completed-record retention TTL, seconds                                                                                                          |
 | `scope`   | Key namespace, see below                                                                                                                                         |
 
+The attribute goes on a **method** or on a **class**. On a class it covers **every** method the
+transport dispatches to on that class, including ones inherited from an abstract base — the only way
+to annotate a handler that never redeclares its entry point. On a job handler that is the single
+`handle()`; on a controller it makes *every* action idempotent under the one storage alias, so reach
+for a class attribute there only when that is what you mean. Resolution order, first hit wins:
+
+1. the dispatched method;
+2. the concrete class of the target;
+3. its parents, nearest first.
+
+So a method attribute beats a class one, and a subclass beats the base it inherits from.
+
 Keys are namespaced by **operation identity** so that the same client key sent to two different
 endpoints never replays a foreign response:
 
-| `scope`                    | Key space                                                        |
-|----------------------------|------------------------------------------------------------------|
-| `null` (default)           | `Controller::method` — safe per-operation isolation              |
-| `'payment-flow'`           | Explicit name — intentionally shared by several endpoints        |
-| `Idempotent::SCOPE_GLOBAL` | No namespacing — the client is responsible for global uniqueness |
+| `scope`                    | Key space                                                         |
+|----------------------------|-------------------------------------------------------------------|
+| `null` (default)           | `Controller::method` — safe per-operation isolation                |
+| `'payment-flow'`           | Explicit name — intentionally shared by several endpoints         |
+| `Idempotent::SCOPE_GLOBAL` | No namespacing — the client is responsible for global uniqueness  |
+
+The default scope names the **concrete** class, not the one that declares the method, so sibling
+subclasses sharing one inherited entry point get one key space each.
 
 ### ExactlyOnce: write through the transaction
 

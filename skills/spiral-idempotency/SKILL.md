@@ -53,6 +53,9 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
   valid, a missing one throws on the first `#[Idempotent]` call.
 - Outcome middleware outer, key middleware inner in every `transports.<name>` list.
 - Queue: `RetryPolicyInterceptor` must stay outer of the idempotency interceptor on consume.
+- A handler whose entry point is inherited (an abstract `handle()`) carries `#[Idempotent]` on the
+  **class**; it then covers every method the transport dispatches to on that class — on a
+  controller, every action. A method attribute wins over a class one, a subclass over its base.
 - Inbox = `TransactionMode::Exclusive`: no surrounding transaction around the handler.
 - ExactlyOnce holds only for writes through `CycleContext` — any external effect degrades it to
   AtLeastOnce.
