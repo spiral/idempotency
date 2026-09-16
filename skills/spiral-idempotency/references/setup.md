@@ -103,6 +103,10 @@ return [
 ];
 ```
 
+`default` is the alias used by an `#[Idempotent]` that passes no `storage:` — handy when the project
+has one storage. It is optional; without it every attribute must name its alias. It must name a key of
+`storages`: a dangling `default` throws `MisconfigurationException` at bootstrap.
+
 Rules for the `transports` section (uncomment/add the entries for the project):
 
 - **The section itself is optional** — a project that only calls `IdempotencyRegistry::execute()`

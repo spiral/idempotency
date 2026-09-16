@@ -11,6 +11,7 @@ use Spiral\Boot\Bootloader\Bootloader;
 use Spiral\Core\FactoryInterface;
 use Spiral\Idempotency\ArgumentKeyResolver;
 use Spiral\Idempotency\Config\IdempotencyConfig;
+use Spiral\Idempotency\Exception\MisconfigurationException;
 use Spiral\Idempotency\IdempotencyRegistry;
 use Spiral\Idempotency\StorageFactory;
 use Spiral\Idempotency\StorageServices;
@@ -89,11 +90,29 @@ final class IdempotencyBootloader extends Bootloader
             $container->has(LoggerInterface::class) ? $container->get(LoggerInterface::class) : null,
         );
 
-        $registry = new IdempotencyRegistry();
+        $default = $config->getDefault();
+
+        $registry = new IdempotencyRegistry($default);
         foreach ($config->getStorages() as $alias => $storage) {
             $storageFactory = $factory->make($storage->factory());
             \assert($storageFactory instanceof StorageFactory);
             $registry->register($alias, $storageFactory->create($storage, $services), $storage->guarantee());
+        }
+
+        // Checked here rather than on first use: a `default` pointing at a missing alias breaks every
+        // #[Idempotent] that omits `storage:`, and that must not wait for production traffic to surface.
+        if ($default !== null && !$registry->has($default)) {
+            throw new MisconfigurationException(
+                \sprintf('The idempotency config declares default storage alias "%s", which is not configured.', $default),
+                \sprintf(
+                    'Register the alias under `storages` in `config/idempotency.php`, or point `default` '
+                    . 'at a configured one. Configured aliases: %s.',
+                    \implode(', ', \array_map(
+                        static fn(string $alias): string => '"' . $alias . '"',
+                        \array_keys($config->getStorages()),
+                    )) ?: 'none',
+                ),
+            );
         }
 
         return $registry;

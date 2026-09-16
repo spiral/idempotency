@@ -54,6 +54,8 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
   valid, a missing one throws on the first `#[Idempotent]` call. The `transports` section as a whole
   is optional (no transport bootloader → omit it). Events are the exception: no interceptor, no
   config entry.
+- `#[Idempotent]` without `storage:` takes the config's `default` alias; with no `default` set it
+  throws before the action runs (a listener: already at registration). `default` must name a configured storage — a dangling one fails at bootstrap.
 - Outcome middleware outer, key middleware inner in every `transports.<name>` list.
 - Queue: `RetryPolicyInterceptor` must stay outer of the idempotency interceptor on consume.
 - A handler whose entry point is inherited (an abstract `handle()`) carries `#[Idempotent]` on the
