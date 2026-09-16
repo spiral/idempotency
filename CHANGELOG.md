@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/spiral/idempotency/compare/0.4.0...0.4.1) (2026-09-16)
+
+
+### Features
+
+* **config:** honour the default storage alias in #[Idempotent] ([#24](https://github.com/spiral/idempotency/issues/24)) ([f9e96b8](https://github.com/spiral/idempotency/commit/f9e96b87440ab95101abee66ae7b21978f56472b))
+
 ## [0.4.0](https://github.com/spiral/idempotency/compare/0.3.0...0.4.0) (2026-09-15)
 
 
