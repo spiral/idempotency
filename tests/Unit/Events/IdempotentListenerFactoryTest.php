@@ -127,6 +127,13 @@ final class OrderListeners
         $this->record('configured');
     }
 
+    // No storage, and the registry under test declares no default — the alias resolves to nothing.
+    #[Idempotent]
+    public function unroutable(object $event): void
+    {
+        $this->record('unroutable');
+    }
+
     #[Idempotent(storage: 'locked')]
     public function contended(object $event): void
     {
@@ -362,6 +369,23 @@ final class IdempotentListenerFactoryTest
         $this->dispatch($this->fanOut(new OrderListeners(), 'recorded'), new OrderPlaced('evt-14'));
 
         Assert::same($this->recorder->keys(), [OrderListeners::class . '::recorded:evt-14']);
+    }
+
+    public function unresolvableStorageFailsWhenTheListenerIsRegistered(): void
+    {
+        $listeners = new OrderListeners();
+        $factory = new IdempotentListenerFactory(new AutowireListenerFactory(), $this->container);
+
+        // At registration, not on the first event: a misconfigured deployment must break on boot rather
+        // than on the delivery of one event out of a fan-out.
+        try {
+            $factory->create($listeners, 'unroutable');
+            Assert::fail('An unresolvable storage alias must not be deferred to the first dispatch.');
+        } catch (MisconfigurationException $e) {
+            Assert::string($e->getMessage())->contains('no default');
+        }
+
+        Assert::same($listeners->runs, []);
     }
 
     public function lockedPropagatesUntouched(): never

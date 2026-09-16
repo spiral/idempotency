@@ -110,3 +110,6 @@ if (\is_array($config['transports'] ?? null)) {
 
 echo "Use an alias above in #[Idempotent(storage: '<alias>')]; match its guarantee to the operation\n";
 echo "(see SKILL.md). If none fits, add a new storage to the config rather than misusing one.\n";
+echo \is_string($default)
+    ? "Omitting `storage:` falls back to the default alias '$default'.\n"
+    : "No default alias is configured, so `storage:` is mandatory in every #[Idempotent].\n";

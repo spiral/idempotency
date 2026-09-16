@@ -5,8 +5,9 @@ How to make a handler idempotent once the package is set up (see `setup.md` if i
 ## 0. Discover the available storages first
 
 The `storage:` argument of `#[Idempotent]` must name an alias declared in
-`app/config/idempotency.php`, and the alias determines the guarantee your handler gets. Before
-writing the attribute, list what the project declares:
+`app/config/idempotency.php` (or be omitted, taking the config's `default` alias), and the alias
+determines the guarantee your handler gets. Before writing the attribute, list what the project
+declares:
 
 ```bash
 php <this-skill-dir>/scripts/list-storages.php --root=.
@@ -28,7 +29,10 @@ use Spiral\Idempotency\Attribute\Idempotent;
 #[Idempotent(storage: 'payments', key: 'command.orderId', lockTtl: 60, ttl: 86400, scope: null)]
 ```
 
-- `storage` — alias from config; the only infrastructure reference in business code.
+- `storage` — alias from config; the only infrastructure reference in business code. Omit it and the
+  config's `default` alias is used; with no `default` configured, an omitted `storage` throws
+  `MisconfigurationException` — before the action runs, so it never becomes a transport response, and
+  for an event listener already at registration.
 - `key` — dot-path over the **call arguments**, walked by `ArgumentKeyResolver`; the leaf may be a
   non-boolean scalar, a `Stringable` (UUID/ULID value objects) or a backed enum. `null` lets the transport
   middleware supply it (HTTP header/field, job header, gRPC metadata). A path resolving to nothing —

@@ -86,6 +86,35 @@ final class IdempotencyRegistryTest
         (new IdempotencyRegistry())->get('missing');
     }
 
+    public function nullAliasFallsBackToTheConfiguredDefault(): void
+    {
+        $driver = $this->driver(Guarantee::ExactlyOnce);
+        $registry = new IdempotencyRegistry('orders');
+        $registry->register('orders', $driver, Guarantee::ExactlyOnce);
+
+        Assert::same($registry->resolve(null), $driver);
+    }
+
+    public function explicitAliasWinsOverTheDefault(): void
+    {
+        $registry = new IdempotencyRegistry('orders');
+        $registry->register('orders', $this->driver(Guarantee::ExactlyOnce), Guarantee::ExactlyOnce);
+        $notifications = $this->driver(Guarantee::AtLeastOnce);
+        $registry->register('notifications', $notifications, Guarantee::AtLeastOnce);
+
+        Assert::same($registry->resolve('notifications'), $notifications);
+    }
+
+    public function nullAliasWithoutADefaultThrows(): never
+    {
+        $registry = new IdempotencyRegistry();
+        $registry->register('orders', $this->driver(Guarantee::ExactlyOnce), Guarantee::ExactlyOnce);
+
+        Expect::exception(MisconfigurationException::class)->withMessageContaining('no default');
+
+        $registry->resolve(null);
+    }
+
     private function driver(Guarantee $guarantee): Idempotency
     {
         return new class ($guarantee) implements Idempotency, GuaranteeProvider {

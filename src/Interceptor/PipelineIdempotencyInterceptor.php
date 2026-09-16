@@ -32,7 +32,7 @@ use Spiral\Interceptors\HandlerInterface;
  * Thin, transport-agnostic entry point into the config-driven pipeline: it reads the attribute, builds
  * an {@see IdempotencyCall} (the whole call context as {@see IdempotencyCall::$context}), assembles this
  * transport's resolution stack from config, and runs it around the storage handler
- * (`registry->get(storage)->execute(...)`).
+ * (`registry->resolve(storage)->execute(...)`).
  *
  * Everything transport-specific lives in the resolution middleware (HTTP key extraction, response
  * marshalling, Locked→409). One instance per transport, parameterized by {@see $transport} — the same
@@ -89,7 +89,11 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
             return $handler->handle($context);
         }
 
-        $storage = $attribute->storage;
+        // Resolved before the pipeline runs: an alias that names nothing — or an omitted one with no
+        // configured default — is a misconfiguration, not an outcome of the call. Resolved inside the
+        // terminal it would instead travel back through this transport's outcome middleware and become a
+        // 4xx/5xx response, cacheable under FailurePolicy::Cache.
+        $idempotency = $this->registry->resolve($attribute->storage);
 
         // Namespace the key by operation identity (Class::method) unless the attribute overrides it, so the
         // same client key on two different endpoints sharing a storage alias does not cross-replay. An
@@ -113,7 +117,7 @@ final class PipelineIdempotencyInterceptor implements IdempotencyInterceptor
 
         return ($this->pipeline ??= $this->buildPipeline())->process(
             $call,
-            fn(IdempotencyCall $c): mixed => $this->registry->get($storage)->execute(
+            static fn(IdempotencyCall $c): mixed => $idempotency->execute(
                 $c->key ?? throw new MissingKeyException(
                     'No idempotency key was resolved by the attribute arg-path nor by any transport middleware.',
                 ),

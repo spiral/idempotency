@@ -114,7 +114,10 @@ final class IdempotencyConfig extends InjectableConfig
     }
 
     /**
-     * @return non-empty-string|null
+     * Alias serving an {@see \Spiral\Idempotency\Attribute\Idempotent} that names no storage.
+     *
+     * @return non-empty-string|null null when the config declares none, which makes the attribute's
+     *         `storage:` argument mandatory
      */
     public function getDefault(): ?string
     {

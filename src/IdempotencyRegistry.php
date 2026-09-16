@@ -21,6 +21,14 @@ final class IdempotencyRegistry
     /** @var array<non-empty-string, Idempotency> */
     private array $drivers = [];
 
+    /**
+     * @param non-empty-string|null $default alias serving an {@see Attribute\Idempotent} that names no
+     *        storage; `null` makes the attribute's `storage:` argument mandatory
+     */
+    public function __construct(
+        private readonly ?string $default = null,
+    ) {}
+
     public function register(string $alias, Idempotency $driver, Guarantee $declared): void
     {
         if ($driver instanceof GuaranteeProvider && !$driver->guarantee()->satisfies($declared)) {
@@ -52,6 +60,20 @@ final class IdempotencyRegistry
                 $alias,
             ),
         );
+    }
+
+    /**
+     * Resolve an optional alias: a handler that names no storage falls back to the configured `default`.
+     *
+     * @throws MisconfigurationException when neither the caller nor the config names an alias
+     */
+    public function resolve(?string $alias): Idempotency
+    {
+        return $this->get($alias ?? $this->default ?? throw new MisconfigurationException(
+            'No idempotency storage alias given, and the idempotency config declares no default.',
+            'Pass `storage:` to the #[Idempotent] attribute, or name a fallback alias under `default` '
+            . "in `config/idempotency.php`, e.g. `'default' => 'orders'`.",
+        ));
     }
 
     public function has(string $alias): bool

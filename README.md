@@ -107,6 +107,13 @@ return [
 ];
 ```
 
+`default` names the alias an `#[Idempotent]` without a `storage:` argument falls back to, so a
+single-storage application never repeats the alias in business code. It is optional: omit it and
+`storage:` becomes mandatory — an attribute that then omits it throws `MisconfigurationException`
+before the action runs (never as a `4xx`/`5xx` response: a misconfiguration is not an outcome of the
+call), and for an event listener already when the listener is registered.
+A `default` pointing at an alias absent from `storages` fails at bootstrap, not on the first call.
+
 `transports` is optional as a whole — omit it when no transport bootloader is registered (the
 `IdempotencyRegistry::execute()` usage below). Once one is registered, its own entry becomes
 mandatory: a missing `transports.<name>` throws `MisconfigurationException` on the first
@@ -419,7 +426,7 @@ listener whose failure is a final answer.
 
 | Parameter | Meaning                                                                                                                                                          |
 |-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `storage` | Semantic alias from the config — the only infrastructure reference in business code                                                                              |
+| `storage` | Semantic alias from the config — the only infrastructure reference in business code. Omit it to take the config's `default` alias                                 |
 | `key`     | Dot-notation path over the **call arguments**, resolved by `ArgumentKeyResolver`: the leaf may be a non-boolean scalar, a `Stringable` (domain id) or a backed enum. `null` lets a transport middleware supply the key (HTTP header/field). A path that resolves to nothing fails fast |
 | `lockTtl` | Override of the PROCESSING lock TTL, seconds (lease driver only)                                                                                                 |
 | `ttl`     | Override of the completed-record retention TTL, seconds                                                                                                          |

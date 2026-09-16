@@ -55,8 +55,9 @@ final readonly class IdempotentListenerFactory implements ListenerFactoryInterfa
     /**
      * @param ListenerFactoryInterface $factory inner factory building the actual listener closure —
      *        `AutowireListenerFactory` in a stock application
-     * @param ContainerInterface $container read per dispatch, never at construction: the factory runs
-     *        during bootstrap, before the idempotency registry is assembled
+     * @param ContainerInterface $container read from {@see create()} onwards, never at construction: the
+     *        factory is built during bootstrap, before the idempotency registry is assembled, while
+     *        listeners are registered from the `bootstrapped` callback — by then the registry resolves
      * @param FailurePolicy $failurePolicy what a failing listener does to its key when the attribute
      *        states no policy; the default frees it so the next delivery of the event re-runs that
      *        listener
@@ -79,11 +80,16 @@ final readonly class IdempotentListenerFactory implements ListenerFactoryInterfa
         $scope = $attribute->scope ?? $this->listenerId($listener, $method);
         $scope = $scope === Idempotent::SCOPE_GLOBAL ? null : $scope;
 
-        return function (object $event) use ($inner, $attribute, $scope): void {
-            $registry = $this->container->get(IdempotencyRegistry::class);
-            \assert($registry instanceof IdempotencyRegistry);
+        $registry = $this->container->get(IdempotencyRegistry::class);
+        \assert($registry instanceof IdempotencyRegistry);
 
-            $registry->get($attribute->storage)->execute(
+        // Resolved while the listener is being registered, not on the first event: a storage alias that
+        // names nothing is a misconfiguration, and a deployment must break on boot rather than on the
+        // first delivery of one event out of a fan-out.
+        $idempotency = $registry->resolve($attribute->storage);
+
+        return function (object $event) use ($inner, $attribute, $scope, $idempotency): void {
+            $idempotency->execute(
                 $this->key($attribute, $event, $scope),
                 fn(IdempotencyContext $context): null => $this->run($inner, $event, $context),
                 new ExecuteOptions(

@@ -7,9 +7,9 @@ namespace Spiral\Idempotency\Attribute;
 use Spiral\Idempotency\FailurePolicy;
 
 /**
- * Marks a handler as idempotent. The target carries a *semantic storage alias*; the
- * concrete driver and the declared guarantee live in config — infra never leaks into
- * business code.
+ * Marks a handler as idempotent. The target carries a *semantic storage alias* (or none, to take the
+ * config's `default` alias); the concrete driver and the declared guarantee live in config — infra
+ * never leaks into business code.
  *
  * Placed on a method it covers that method; placed on a class it covers *every* method the transport
  * dispatches to on that class — including one inherited from an abstract base (a `JobHandler::handle()`
@@ -32,7 +32,9 @@ final readonly class Idempotent
     public const SCOPE_GLOBAL = '';
 
     /**
-     * @param non-empty-string $storage semantic alias from config (driver + guarantee live there)
+     * @param non-empty-string|null $storage semantic alias from config (driver + guarantee live there);
+     *        null falls back to the `default` alias of `config/idempotency.php`, and is a
+     *        misconfiguration when that one is absent too
      * @param string|null $key property-path to the key (dot-notation over the call arguments, resolved by
      *        {@see \Spiral\Idempotency\ArgumentKeyResolver}: scalar, Stringable or backed-enum leaves),
      *        or null to let a transport middleware supply the key
@@ -58,7 +60,7 @@ final readonly class Idempotent
      *        Lease/AtLeastOnce storages only — the inbox and at-most-once drivers ignore it.
      */
     public function __construct(
-        public string $storage,
+        public ?string $storage = null,
         public ?string $key = null,
         public ?int $lockTtl = null,
         public ?int $ttl = null,
