@@ -57,6 +57,15 @@ final class RedisAtMostOnceTest
         Assert::true($ttl > 100 && $ttl <= 120, "TTL is $ttl");
     }
 
+    public function theOperationTtlOverridesTheMarkerTtl(): void
+    {
+        $key = $this->key();
+        $this->driver(retentionTtl: 600)->execute($key, static fn(): string => 'v', new ExecuteOptions(ttl: 45));
+
+        $ttl = $this->client()->ttl(self::PREFIX . $key);
+        Assert::true($ttl > 30 && $ttl <= 45, "TTL is $ttl");
+    }
+
     public function aThrowingEffectIsNotReRunEvenUnderRelease(): void
     {
         $key = $this->key();
