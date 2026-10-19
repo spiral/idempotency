@@ -14,6 +14,7 @@ use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\GuaranteeProvider;
 use Spiral\Idempotency\Idempotency;
+use Spiral\Idempotency\Internal\AtMostOnceContext;
 use Spiral\Idempotency\Uncacheable;
 use Spiral\Serializer\Serializer\PhpSerializer;
 use Spiral\Serializer\SerializerInterface;
