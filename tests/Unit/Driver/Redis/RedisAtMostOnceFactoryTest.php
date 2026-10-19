@@ -76,7 +76,7 @@ final class RedisAtMostOnceFactoryTest
             ->create(new RedisAtMostOnceConfig(cacheResult: true), $services)
             ->execute('k', static fn(): array => ['id' => 42]);
 
-        Assert::same($redis->store['idempotency:amo:k']['value'], 'R:{"id":42}');
+        Assert::same($redis->store['idempotency-amo:k']['value'], 'R:{"id":42}');
     }
 
     public function withoutTheResultCacheADuplicateGetsNull(): void

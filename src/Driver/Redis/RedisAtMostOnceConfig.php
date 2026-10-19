@@ -37,8 +37,9 @@ use Spiral\Idempotency\StorageFactory;
 final class RedisAtMostOnceConfig extends StorageConfig
 {
     /**
-     * @param non-empty-string $keyPrefix prepended to every Redis key (namespacing); keep it apart from
-     *        a {@see RedisLeaseConfig} prefix on the same server, the two record shapes are incompatible
+     * @param non-empty-string $keyPrefix prepended to every Redis key (namespacing). On a server shared with a
+     *        {@see RedisLeaseConfig}, neither prefix may start with the other: the lease keeps a hash under
+     *        the key, this driver a string, so a shared key reads as taken or fails with `WRONGTYPE`
      * @param int<1, max> $retentionTtl dedup window, seconds: the marker's server-side TTL. Choose a value
      *        safely longer than the maximum expected redelivery/replay delay. `ttl:` on `#[Idempotent]`
      *        overrides it per operation.
@@ -47,7 +48,7 @@ final class RedisAtMostOnceConfig extends StorageConfig
      * @param Guarantee $guarantee declared guarantee (must be backable by the at-most-once driver)
      */
     public function __construct(
-        public readonly string $keyPrefix = 'idempotency:amo:',
+        public readonly string $keyPrefix = 'idempotency-amo:',
         public readonly int $retentionTtl = 86400,
         public readonly bool $cacheResult = false,
         public readonly Guarantee $guarantee = Guarantee::AtMostOnce,

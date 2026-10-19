@@ -74,7 +74,7 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
     public function __construct(
         private RedisCommands $client,
         private TokenFactory $tokens,
-        private string $keyPrefix = 'idempotency:amo:',
+        private string $keyPrefix = 'idempotency-amo:',
         private int $retentionTtl = 86400,
         ?SerializerInterface $serializer = null,
         private bool $cacheResult = false,

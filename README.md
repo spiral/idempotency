@@ -140,7 +140,7 @@ use Spiral\Idempotency\Driver\Redis\RedisAtMostOnceConfig;
 
 'storages' => [
     'jobs' => new RedisAtMostOnceConfig(
-        keyPrefix: 'idempotency:amo:', // keep it apart from a RedisLeaseConfig prefix
+        keyPrefix: 'idempotency-amo:', // must not start with a RedisLeaseConfig prefix, nor it with this one
         retentionTtl: 86400,           // dedup window: a duplicate after it RE-EXECUTES
         cacheResult: false,            // true: best-effort replay of the result instead of null
     ),

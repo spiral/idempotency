@@ -19,7 +19,7 @@ final class RedisAtMostOnceConfigTest
     {
         $config = new RedisAtMostOnceConfig();
 
-        Assert::same($config->keyPrefix, 'idempotency:amo:');
+        Assert::same($config->keyPrefix, 'idempotency-amo:');
         Assert::same($config->retentionTtl, 86400);
         Assert::false($config->cacheResult);
         Assert::same($config->guarantee(), Guarantee::AtMostOnce);
