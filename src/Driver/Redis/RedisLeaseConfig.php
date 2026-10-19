@@ -15,7 +15,8 @@ use Spiral\Idempotency\StorageFactory;
  * The lease record is one Redis HASH per key at `{keyPrefix}{key}`; server-side EXPIRE carries the
  * lock/retention TTL, so an expired lease simply vanishes (no explicit takeover branch, unlike the SQL
  * driver). Only the lease (AtLeastOnce) branch is offered here — the inbox (ExactlyOnce) needs a single
- * DB transaction over the side-effect and stays on the Cycle driver.
+ * DB transaction over the side-effect and stays on the Cycle driver. Needs Redis 4.0+ (multi-field `HSET`)
+ * or Valkey.
  *
  * No connection parameters live here: {@see RedisLeaseFactory} takes the connection from the container —
  * a {@see RedisCommands} binding (an adapter over any Redis client), or a `\Predis\ClientInterface`

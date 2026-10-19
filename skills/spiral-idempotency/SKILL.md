@@ -73,9 +73,13 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
   is cached; set `failurePolicy:` on `#[Idempotent]` when the operation needs the other one.
 - Setting `retentionTtl` on inbox/at-most-once narrows the dedup window — swept records mean a
   late duplicate re-executes. `RedisAtMostOnceConfig` always has one (default 86400 s): its marker
-  expires server-side, so size it above the longest redelivery delay.
-- The Redis storages (lease and at-most-once) run on Valkey as well as Redis; give each its own
-  `keyPrefix` on a shared server, and never one that starts with another's (`idempotency:` vs
-  `idempotency:amo:`): the lease stores a hash, at-most-once a string, so a shared key is silently
-  refused or fails with `WRONGTYPE`.
+  expires server-side, counted from the claim, so size it above the longest operation plus the longest
+  redelivery delay — an operation outliving it lets a concurrent duplicate run the effect again.
+- `RedisAtMostOnceConfig` needs a server that keeps volatile keys: `maxmemory-policy noeviction` (any
+  `volatile-*`/`allkeys-*` policy may evict markers) and AOF persistence; a failover to an async replica
+  can still drop the latest markers. An early-lost marker re-runs the effect on a duplicate.
+- The Redis storages (lease and at-most-once) run on Valkey as well as Redis (lease: Redis 4.0+,
+  at-most-once: 3.2+); give each its own `keyPrefix` on a shared server, and never one that starts with
+  another's — e.g. not `idempotency:` with `idempotency:amo:`: the lease stores a hash, at-most-once a
+  string, so a shared key is silently refused or fails with `WRONGTYPE`.
 - The upsert dedup relies on `cycle/database >= 2.21` (MySQL/Postgres `DO NOTHING` fixes).
