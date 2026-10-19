@@ -25,6 +25,7 @@ use Spiral\Idempotency\Driver\Cycle\Internal\CycleInboxDriver;
 use Spiral\Idempotency\Driver\Cycle\Internal\CycleLeaseStorage;
 use Spiral\Idempotency\Exception\LeaseLostException;
 use Spiral\Idempotency\Exception\MisconfigurationException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\Guarantee;
@@ -375,9 +376,8 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
 
         // First run: the effect runs and the value reaches the caller.
         Assert::same($driver->execute($key, $op), 'v:' . $key);
-        // Duplicate: refused (not re-run). The default (no result cache) signals "already processed"
-        // with null, and the effect ran exactly once.
-        Assert::null($driver->execute($key, $op));
+        // Duplicate: refused (not re-run). Without the result cache there is no outcome to replay.
+        $this->assertOutcomeUnknown($driver, $key, $op);
         Assert::same($this->ledgerCount($key), 1);
         Assert::same($calls, 1);
     }
@@ -404,7 +404,7 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
         }
 
         // ...but the marker persists, so the retry is refused: no re-run, exactly one partial effect.
-        Assert::null($driver->execute($key, $op));
+        $this->assertOutcomeUnknown($driver, $key, $op);
         Assert::same($this->ledgerCount($key), 1);
         Assert::same($calls, 1);
     }
@@ -429,7 +429,7 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
         }
 
         // The marker stands despite Release: the retry is refused, not re-run.
-        Assert::null($driver->execute($key, $op, $options));
+        $this->assertOutcomeUnknown($driver, $key, $op, $options);
         Assert::same($this->ledgerCount($key), 1);
         Assert::same($calls, 1);
     }
@@ -464,6 +464,43 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
         Assert::same($driver->execute($key, $op), 'v');
         // ...and the duplicate replays it from the cache without re-running the operation.
         Assert::same($driver->execute($key, $op), 'v');
+        Assert::same($calls, 1);
+    }
+
+    public function atMostOnceCachedNullResultReplaysAsNull(): void
+    {
+        // A stored null is a real outcome (a void operation), distinct from "nothing stored".
+        $key = $this->key();
+        $driver = $this->atMostOnceDriver(cacheResult: true);
+        $calls = 0;
+        $op = static function () use (&$calls): null {
+            ++$calls;
+            return null;
+        };
+
+        Assert::null($driver->execute($key, $op));
+        Assert::null($driver->execute($key, $op));
+        Assert::same($calls, 1);
+    }
+
+    public function atMostOnceCachedResultMissingAfterFailureIsUnknown(): void
+    {
+        // The first run never reached the result write: the cache is on, yet there is nothing to replay.
+        $key = $this->key();
+        $driver = $this->atMostOnceDriver(cacheResult: true);
+        $calls = 0;
+        $op = static function () use (&$calls): never {
+            ++$calls;
+            throw new \RuntimeException('boom');
+        };
+
+        try {
+            $driver->execute($key, $op);
+            Assert::fail('the operation must propagate its RuntimeException');
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertOutcomeUnknown($driver, $key, $op);
         Assert::same($calls, 1);
     }
 
@@ -709,6 +746,23 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
         $transaction = new TransactionImpl(new ORM(new Factory($manager), new Schema([])), $manager);
 
         return new CycleInboxDriver(static fn(): TransactionImpl => $transaction, new MutableClock());
+    }
+
+    /**
+     * @param non-empty-string $key
+     */
+    private function assertOutcomeUnknown(
+        CycleAtMostOnceDriver $driver,
+        string $key,
+        \Closure $operation,
+        ?ExecuteOptions $options = null,
+    ): void {
+        try {
+            $driver->execute($key, $operation, $options);
+            Assert::fail('a duplicate without a stored outcome must throw OutcomeUnknownException');
+        } catch (OutcomeUnknownException $e) {
+            Assert::same($e->key, $key);
+        }
     }
 
     private function atMostOnceDriver(bool $cacheResult = false): CycleAtMostOnceDriver

@@ -10,6 +10,7 @@ use Cycle\Database\Query\OnConflict;
 use Cycle\Database\Query\QueryParameters;
 use Psr\Clock\ClockInterface;
 use Spiral\Idempotency\Exception\MisconfigurationException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\GuaranteeProvider;
@@ -25,8 +26,9 @@ use Spiral\Serializer\SerializerInterface;
  *   1. `INSERT ... ON CONFLICT (key) DO NOTHING` commits immediately (the point of no return);
  *   2. on a fresh insert the effect runs fire-and-forget — a crash here loses the effect, the marker
  *      persists, so a retry is *refused* (not re-run). The effect therefore runs 0 or 1 times;
- *   3. a duplicate sees the marker and is refused: it returns `null` (fire-once) or, with
- *      {@see $cacheResult} on, the best-effort cached result.
+ *   3. a duplicate sees the marker and is refused: with {@see $cacheResult} on it replays the stored
+ *      result (`null` included); otherwise — or when nothing was stored — it throws
+ *      {@see OutcomeUnknownException}, never inventing an outcome.
  *
  * This is a dedup-guard, not an idempotency cache: only the effect (≤ 1) is guaranteed. The optional
  * result cache ({@see $cacheResult}) is written *after* the effect, NOT atomically with the marker, so
@@ -48,7 +50,8 @@ final readonly class CycleAtMostOnceDriver implements Idempotency, GuaranteeProv
      *        a container cycle during interceptor-pipeline assembly
      * @param non-empty-string $table
      * @param bool $cacheResult best-effort store + replay of the operation result (default off: a
-     *        duplicate gets `null`). Even when on, replay is not guaranteed (see class docblock).
+     *        duplicate gets {@see OutcomeUnknownException}). Even when on, replay is not guaranteed (see
+     *        class docblock).
      */
     public function __construct(
         private \Closure $database,
@@ -89,7 +92,7 @@ final readonly class CycleAtMostOnceDriver implements Idempotency, GuaranteeProv
         // Atomic conditional insert = the commit point. No takeover of an existing record (any record
         // means "already consumed").
         if ($this->runInsert($db, $key) !== 1) {
-            return $this->replay($db, $key); // duplicate → fire-once null (or best-effort result)
+            return $this->replay($db, $key);
         }
 
         // Marker committed. Fire-and-forget: on ANY outcome (success, throwable, crash) the marker
@@ -99,8 +102,9 @@ final readonly class CycleAtMostOnceDriver implements Idempotency, GuaranteeProv
             $value = $value->value;
         }
 
-        if ($this->cacheResult && $value !== null) {
-            // Best-effort ONLY: a crash before this UPDATE loses the cache, not the dedup.
+        if ($this->cacheResult) {
+            // Best-effort ONLY: a crash before this UPDATE loses the cache, not the dedup. A `null` result
+            // is stored serialized as well: the column's NULL is reserved for "no outcome stored".
             $db->update(
                 $this->table,
                 ['result' => (string) $this->serializer->serialize($value)],
@@ -112,19 +116,20 @@ final readonly class CycleAtMostOnceDriver implements Idempotency, GuaranteeProv
     }
 
     /**
-     * A duplicate: the effect already ran (or was lost). With the result cache off, "already processed"
-     * is signalled with `null`; with it on, read the best-effort cached result (which may still be
-     * `null` if the first caller never reached the store).
+     * A duplicate: the effect already ran (or was lost). Replays the stored result when there is one.
+     *
+     * @param non-empty-string $key
+     * @throws OutcomeUnknownException when the result cache is off, or the first caller never stored one
      */
     private function replay(DatabaseInterface $db, string $key): mixed
     {
         if (!$this->cacheResult) {
-            return null;
+            throw new OutcomeUnknownException($key);
         }
 
         $row = $db->select('result')->from($this->table)->where('key', $key)->run()->fetch();
         if (!\is_array($row) || $row['result'] === null) {
-            return null;
+            throw new OutcomeUnknownException($key);
         }
 
         return $this->serializer->unserialize((string) $row['result']);

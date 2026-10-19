@@ -8,6 +8,7 @@ use Google\Rpc\RetryInfo;
 use Spiral\Idempotency\Exception\CachedDomainFailureException;
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\Exception\MissingKeyException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Grpc\DomainFailureMapper;
 use Spiral\Idempotency\Grpc\GrpcOutcomeMiddleware;
@@ -274,6 +275,32 @@ final class GrpcOutcomeMiddlewareTest
         Assert::same((int) $delay->getSeconds(), 7);
     }
 
+    public function mapsOutcomeUnknownToAbortedWithoutRetryHint(): void
+    {
+        $headers = new ResponseHeaders();
+        $middleware = new GrpcOutcomeMiddleware();
+        $call = $this->serviceCall(static fn(): mixed => new FakeGrpcMessage('pong'), $this->grpcContext($headers));
+        $unknown = new OutcomeUnknownException('k');
+
+        $thrown = null;
+        try {
+            $middleware->process($call, static function (IdempotencyCall $c) use ($unknown): never {
+                throw $unknown;
+            });
+            Assert::fail('an OutcomeUnknownException must be mapped to a GRPCException');
+        } catch (GRPCException $e) {
+            $thrown = $e;
+        }
+
+        Assert::notNull($thrown);
+        Assert::same($thrown->getCode(), StatusCode::ABORTED);
+        Assert::same($thrown->getPrevious(), $unknown);
+        // No RetryInfo: unlike a lock, retrying the same key never yields a different answer.
+        Assert::same($thrown->getDetails(), []);
+        Assert::same($headers->get('idempotency-replay'), 'true');
+        Assert::same($headers->get('idempotency-key'), 'k');
+    }
+
     public function mapsMissingKeyToInvalidArgument(): void
     {
         $middleware = new GrpcOutcomeMiddleware();
@@ -523,7 +550,7 @@ final class GrpcOutcomeMiddlewareTest
 
     public function nullOutcomeBecomesTheDeclaredEmptyResponse(): void
     {
-        // A fire-once duplicate (AtMostOnce) or a void operation resolves to null. The bridge's Invoker
+        // A void operation resolves to null, on the first call and on a replay. The bridge's Invoker
         // requires a Message — `resultToString(Message $result)` — and its TypeError would surface as a
         // worker error, not a status. The declared response type is materialized instead.
         $middleware = new GrpcOutcomeMiddleware();

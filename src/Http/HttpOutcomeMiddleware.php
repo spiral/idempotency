@@ -9,6 +9,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\Exception\MissingKeyException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\Internal\Pipeline\DefaultFailureClassifier;
 use Spiral\Idempotency\Lease\Locked;
@@ -27,9 +28,12 @@ use Spiral\Idempotency\Uncacheable;
  *  - rebuilds the response from the snapshot on the way out (via PSR-17 factories) and adds the
  *    `Idempotency-Key` / `Idempotency-Replay` headers;
  *  - turns a {@see LockedException} into `409 Conflict` + `Retry-After`;
+ *  - turns an {@see OutcomeUnknownException} (an AtMostOnce duplicate with nothing to replay) into
+ *    `409 Conflict` WITHOUT `Retry-After` — a retry under the same key never gets a different answer;
  *  - turns a {@see MissingKeyException} into `400 Bad Request` (a missing key is a client error, not a 500);
  *  - wraps a non-cacheable response (default: status >= 500, transient) in {@see Uncacheable}, so the
- *    lease handler releases the key and a retry re-runs instead of replaying the error forever;
+ *    lease handler releases the key and a retry re-runs instead of replaying the error forever (the
+ *    inbox and at-most-once storages never re-run: they store and replay it);
  *  - with a {@see DomainFailureRenderer} bound, renders a THROWN domain failure into a response
  *    before it is cached, so a replay reproduces the same status (see below).
  *
@@ -112,6 +116,8 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
             $cached = $next($encoded);
         } catch (LockedException $e) {
             return $this->conflict($e->lock);
+        } catch (OutcomeUnknownException $e) {
+            return $this->outcomeUnknown($e->key);
         } catch (MissingKeyException $e) {
             return $this->badRequest($e->getMessage());
         }
@@ -233,5 +239,25 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
             ->withHeader('Idempotency-Key', $lock->key)
             ->withHeader('Retry-After', (string) $lock->retryAfter)
             ->withBody($this->streams->createStream($payload));
+    }
+
+    /**
+     * The duplicate is answered from the record of the first request, hence the replay header; there is
+     * no `Retry-After` because nothing will ever change that record.
+     *
+     * @param non-empty-string $key
+     */
+    private function outcomeUnknown(string $key): ResponseInterface
+    {
+        $payload = (string) \json_encode([
+            'error' => 'outcome_unknown',
+            'message' => 'Request with this idempotency key was already processed; its outcome is not available.',
+        ]);
+
+        $response = $this->responses->createResponse(409)
+            ->withHeader('Content-Type', 'application/json')
+            ->withBody($this->streams->createStream($payload));
+
+        return $this->decorate($response, $key, replayed: true);
     }
 }

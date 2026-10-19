@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spiral\Idempotency\Queue;
 
 use Spiral\Idempotency\Exception\LockedException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\Pipeline\IdempotencyCall;
 use Spiral\Idempotency\Pipeline\ResolutionMiddleware;
 
@@ -17,8 +18,10 @@ use Spiral\Idempotency\Pipeline\ResolutionMiddleware;
  *    {@see RetryableLockException}, so the job is re-enqueued after the lock TTL rather than failing;
  *  - lets a {@see \Spiral\Idempotency\Exception\MissingKeyException} propagate untouched: a job that can
  *    never resolve a key is not retryable and should dead-letter instead of retrying forever;
- *  - passes the handler's return value through untouched — including a `null` from an AtMostOnce
- *    duplicate — so the consumer ACKs the job (fire-once semantics).
+ *  - turns an {@see OutcomeUnknownException} (an AtMostOnce duplicate with nothing to replay) into a
+ *    `null` result, so the consumer ACKs the job (fire-once semantics) — it never reaches Spiral's retry
+ *    policy, which would otherwise fail or re-enqueue a job that must not run again;
+ *  - passes the handler's return value through untouched.
  *
  * ORDERING: Spiral's default-on `Spiral\Queue\Interceptor\Consume\RetryPolicyInterceptor` must sit
  * OUTSIDE this interceptor in the `interceptors.consume` list, so it catches the re-thrown
@@ -45,6 +48,8 @@ final readonly class QueueRetryMiddleware implements ResolutionMiddleware
             // rather than failing the job. The native RetryPolicyInterceptor (registered OUTSIDE this
             // interceptor) catches this and re-queues with the carried delay.
             throw new RetryableLockException($e->lock->retryAfter, $this->maxLockRetries, $e);
+        } catch (OutcomeUnknownException) {
+            return null;
         }
     }
 }

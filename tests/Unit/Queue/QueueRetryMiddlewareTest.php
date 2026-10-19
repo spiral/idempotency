@@ -6,6 +6,7 @@ namespace Spiral\Idempotency\Tests\Unit\Queue;
 
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\Exception\MissingKeyException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Lease\Locked;
 use Spiral\Idempotency\Pipeline\IdempotencyCall;
@@ -45,6 +46,18 @@ final class QueueRetryMiddlewareTest
         $result = $middleware->process($this->call(), static fn(IdempotencyCall $call): mixed => null);
 
         Assert::same($result, null);
+    }
+
+    public function acksOutcomeUnknownDuplicate(): void
+    {
+        // An AtMostOnce duplicate must neither fail nor re-enqueue: no throwable reaches the retry policy.
+        $middleware = new QueueRetryMiddleware();
+
+        $result = $middleware->process($this->call(), static function (IdempotencyCall $call): never {
+            throw new OutcomeUnknownException('k');
+        });
+
+        Assert::null($result);
     }
 
     public function mapsLockedExceptionToRetryable(): void
