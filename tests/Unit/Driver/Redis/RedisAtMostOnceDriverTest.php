@@ -179,13 +179,14 @@ final class RedisAtMostOnceDriverTest
         Assert::count($redis->calls, 1);
     }
 
-    public function anUncacheableResultIsUnwrapped(): void
+    public function anUncacheableResultIsUnwrappedButNotCached(): void
     {
         $redis = new FakeRedisCommands();
         $driver = $this->driver($redis, cacheResult: true);
 
         Assert::same($driver->execute('k', static fn(): Uncacheable => new Uncacheable('v')), 'v');
-        Assert::same($redis->store['amo:k']['value'], 'R:' . \serialize('v'));
+        Assert::count($redis->calls, 1);
+        Assert::null($driver->execute('k', static fn(): string => 'again'));
     }
 
     public function theResultDoesNotOverwriteAnotherCallersMarker(): void

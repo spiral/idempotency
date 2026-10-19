@@ -107,8 +107,10 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
         // Marker set. Fire-and-forget: on ANY outcome (success, throwable, crash) it stays until the TTL
         // lapses, so a retry is refused and the effect stays ≤ 1.
         $value = $operation(new AtMostOnceContext($key));
+        // A transient outcome cannot be re-run here (the marker stays), but it must not be replayed
+        // either: a duplicate gets `null`, as one arriving before the result is stored would.
         if ($value instanceof Uncacheable) {
-            $value = $value->value;
+            return $value->value;
         }
 
         if ($this->cacheResult && $value !== null) {
