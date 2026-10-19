@@ -6,6 +6,7 @@ namespace Spiral\Idempotency\Driver\Redis\Internal;
 
 use Psr\Log\LoggerInterface;
 use Spiral\Idempotency\Driver\Redis\RedisCommands;
+use Spiral\Idempotency\Exception\IdempotencyException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\GuaranteeProvider;
@@ -99,9 +100,18 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
         $ttl = \max(1, $options?->ttl ?? $this->retentionTtl);
 
         $reply = $this->client->eval(self::CLAIM, [$redisKey], [$marker, (string) $ttl, $this->cacheResult ? '1' : '0']);
-        // Anything but an explicit fresh claim is a refusal: a misread reply must never run the effect twice.
-        if (!\is_array($reply) || (int) ($reply[0] ?? 0) !== 1) {
-            return $this->replay(\is_array($reply) ? ($reply[1] ?? null) : null);
+        if (!$this->isClaimReply($reply)) {
+            // Neither a claim nor a refusal (e.g. `false` from an adapter on a server error): refusing would
+            // ACK a message whose effect never ran, so fail before the effect — still at most once.
+            throw new IdempotencyException(\sprintf(
+                'Unexpected at-most-once claim reply for key "%s": %s.',
+                $key,
+                \get_debug_type($reply),
+            ));
+        }
+
+        if ($reply[0] === 0) {
+            return $this->replay($reply[1] ?? null);
         }
 
         // Marker set. Fire-and-forget: on ANY outcome (success, throwable, crash) it stays until the TTL
@@ -139,6 +149,24 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
                 ['key' => $key, 'exception' => $e],
             );
         }
+    }
+
+    /**
+     * `[1]` (fresh claim), `[0]` or `[0, <stored value>]` (duplicate) — the only shapes {@see self::CLAIM} returns.
+     *
+     * @psalm-assert-if-true array{0: 0|1, 1?: mixed} $reply
+     */
+    private function isClaimReply(mixed $reply): bool
+    {
+        if (!\is_array($reply) || !\array_is_list($reply)) {
+            return false;
+        }
+
+        return match ($reply[0] ?? null) {
+            1 => \count($reply) === 1,
+            0 => \count($reply) <= 2,
+            default => false,
+        };
     }
 
     /**

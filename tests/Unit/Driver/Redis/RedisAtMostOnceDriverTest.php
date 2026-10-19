@@ -7,6 +7,7 @@ namespace Spiral\Idempotency\Tests\Unit\Driver\Redis;
 use Psr\Log\AbstractLogger;
 use Spiral\Idempotency\Driver\Redis\Internal\RedisAtMostOnceDriver;
 use Spiral\Idempotency\Driver\Redis\RedisCommands;
+use Spiral\Idempotency\Exception\IdempotencyException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\Guarantee;
@@ -250,16 +251,58 @@ final class RedisAtMostOnceDriverTest
         Assert::same($driver->execute('k', static fn(): array => []), ['id' => 42]);
     }
 
-    /**
-     * A reply that is not an explicit fresh claim must never run the effect.
-     */
-    #[DataSet(['OK'], 'status string')]
-    #[DataSet([[]], 'empty list')]
-    #[DataSet([[0]], 'refusal')]
-    #[DataSet([null], 'nil')]
-    public function anUnexpectedClaimReplyIsARefusal(mixed $reply): void
+    #[DataSet([[0]], 'bare refusal')]
+    #[DataSet([[0, 'M:other']], 'refusal with a marker')]
+    public function aRefusalReplyDoesNotRunTheEffect(array $reply): void
     {
-        $redis = new class($reply) implements RedisCommands {
+        $calls = 0;
+
+        $result = $this->driver($this->replying($reply), cacheResult: true)->execute('k', static function () use (&$calls): string {
+            ++$calls;
+            return 'v';
+        });
+
+        Assert::null($result);
+        Assert::same($calls, 0);
+    }
+
+    /**
+     * Refusing on a reply it cannot read would ACK a lost effect; failing before the effect keeps it at most once.
+     */
+    #[DataSet([false], 'false')]
+    #[DataSet([null], 'nil')]
+    #[DataSet(['OK'], 'status string')]
+    #[DataSet([1], 'bare integer')]
+    #[DataSet([[]], 'empty list')]
+    #[DataSet([[2]], 'unknown code')]
+    #[DataSet([['1']], 'string code')]
+    #[DataSet([[1, 'x']], 'claim with a value')]
+    #[DataSet([[0, 'x', 'y']], 'refusal with extra values')]
+    public function anUnexpectedClaimReplyThrowsBeforeTheEffect(mixed $reply): void
+    {
+        $calls = 0;
+
+        try {
+            $this->driver($this->replying($reply), cacheResult: true)->execute('k', static function () use (&$calls): string {
+                ++$calls;
+                return 'v';
+            });
+            Assert::fail('an unexpected claim reply must throw');
+        } catch (IdempotencyException $e) {
+            Assert::same($e::class, IdempotencyException::class);
+        }
+
+        Assert::same($calls, 0);
+    }
+
+    private function driver(RedisCommands $redis, int $retentionTtl = 86400, bool $cacheResult = false): RedisAtMostOnceDriver
+    {
+        return new RedisAtMostOnceDriver($redis, $this->tokens(), 'amo:', $retentionTtl, cacheResult: $cacheResult);
+    }
+
+    private function replying(mixed $reply): RedisCommands
+    {
+        return new class($reply) implements RedisCommands {
             public function __construct(
                 private readonly mixed $reply,
             ) {}
@@ -279,20 +322,6 @@ final class RedisAtMostOnceDriverTest
                 return -2;
             }
         };
-        $calls = 0;
-
-        $result = $this->driver($redis, cacheResult: true)->execute('k', static function () use (&$calls): string {
-            ++$calls;
-            return 'v';
-        });
-
-        Assert::null($result);
-        Assert::same($calls, 0);
-    }
-
-    private function driver(RedisCommands $redis, int $retentionTtl = 86400, bool $cacheResult = false): RedisAtMostOnceDriver
-    {
-        return new RedisAtMostOnceDriver($redis, $this->tokens(), 'amo:', $retentionTtl, cacheResult: $cacheResult);
     }
 
     private function tokens(): TokenFactory
