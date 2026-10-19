@@ -7,6 +7,7 @@ namespace Spiral\Idempotency\Driver\Redis\Internal;
 use Psr\Log\LoggerInterface;
 use Spiral\Idempotency\Driver\Redis\RedisCommands;
 use Spiral\Idempotency\Exception\IdempotencyException;
+use Spiral\Idempotency\Exception\MisconfigurationException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\GuaranteeProvider;
@@ -97,7 +98,18 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
         /** @var non-empty-string $key */
         $redisKey = $this->keyPrefix . $key;
         $marker = self::MARKER . $this->tokens->create();
-        $ttl = \max(1, $options?->ttl ?? $this->retentionTtl);
+        // `int<1, max>` is a docblock promise only. A clamp to one second would quietly turn the guard off, so
+        // a `ttl: 0` meant as "no expiry" fails before the claim and the effect never runs.
+        /** @var int|null $operationTtl */
+        $operationTtl = $options?->ttl;
+        if ($operationTtl !== null && $operationTtl < 1) {
+            throw new MisconfigurationException(
+                \sprintf('The at-most-once ttl for key "%s" must be at least 1 second, got %d.', $key, $operationTtl),
+                'Set ttl on #[Idempotent] (or ExecuteOptions) to a dedup window longer than the longest operation '
+                . 'plus the redelivery delay, or omit it to use the storage retentionTtl: a Redis marker always expires.',
+            );
+        }
+        $ttl = $operationTtl ?? $this->retentionTtl;
 
         $reply = $this->client->eval(self::CLAIM, [$redisKey], [$marker, (string) $ttl, $this->cacheResult ? '1' : '0']);
         if (!$this->isClaimReply($reply)) {

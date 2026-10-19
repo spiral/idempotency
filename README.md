@@ -155,7 +155,8 @@ Redis error (logged, not thrown), between the two loses the replay, never the de
 `CycleAtMostOnceConfig`, whose markers live forever by default, a Redis marker always expires, and its
 window counts from the claim, not from completion: an operation that outlives it lets a concurrent
 duplicate claim the key and run the effect again. Pick a `retentionTtl` above the longest operation plus
-the longest redelivery/replay delay; `ttl:` on `#[Idempotent]` overrides it per operation.
+the longest redelivery/replay delay; `ttl:` on `#[Idempotent]` overrides it per operation (below 1 it throws
+before the effect, like a `retentionTtl` below 1 fails when the storage is built).
 
 > [!WARNING]
 > A marker the server drops early re-opens the key to a duplicate, so the at-most-once storage needs a
@@ -463,7 +464,7 @@ listener whose failure is a final answer.
 | `storage` | Semantic alias from the config — the only infrastructure reference in business code. Omit it to take the config's `default` alias                                 |
 | `key`     | Dot-notation path over the **call arguments**, resolved by `ArgumentKeyResolver`: the leaf may be a non-boolean scalar, a `Stringable` (domain id) or a backed enum. `null` lets a transport middleware supply the key (HTTP header/field). A path that resolves to nothing fails fast |
 | `lockTtl` | Override of the PROCESSING lock TTL, seconds (lease driver only)                                                                                                 |
-| `ttl`     | Override of the completed-record retention TTL, seconds (lease storages). On `RedisAtMostOnceConfig` it is the dedup window, counted from the claim; `CycleInboxConfig` and `CycleAtMostOnceConfig` ignore it |
+| `ttl`     | Override of the completed-record retention TTL, seconds (lease storages). On `RedisAtMostOnceConfig` it is the dedup window, counted from the claim (below 1 it throws before the effect); `CycleInboxConfig` and `CycleAtMostOnceConfig` ignore it |
 | `scope`   | Key namespace, see below                                                                                                                                         |
 | `failurePolicy` | What a thrown failure does to the key: `Cache` (replay it) or `Release` (free the key, the next call re-runs). `null` = the transport default, see below   |
 

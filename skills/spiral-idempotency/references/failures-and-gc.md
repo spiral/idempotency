@@ -117,9 +117,10 @@ TTLs, an expired lease simply vanishes; the in-memory lease prunes expired recor
 
 `RedisAtMostOnceConfig` needs no GC either, but it has no "keep forever": the marker is written with
 `SET NX EX retentionTtl` (default 86400 s, `ttl:` on `#[Idempotent]` overrides it per operation; a
-`retentionTtl` below 1 fails fast), so the dedup window is always finite and counts from the claim —
-choose it above the longest operation plus the worst redelivery delay. A marker evicted or lost on a
-restart/failover ends the window early: run it on `maxmemory-policy noeviction` with AOF persistence.
+`retentionTtl` below 1 fails fast, a `ttl:` below 1 throws before the effect), so the dedup window is
+always finite and counts from the claim — choose it above the longest operation plus the worst
+redelivery delay. A marker evicted or lost on a restart/failover ends the window early: run it on
+`maxmemory-policy noeviction` with AOF persistence.
 
 ## Customization points
 

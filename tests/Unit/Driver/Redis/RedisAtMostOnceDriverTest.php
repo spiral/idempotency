@@ -8,6 +8,7 @@ use Psr\Log\AbstractLogger;
 use Spiral\Idempotency\Driver\Redis\Internal\RedisAtMostOnceDriver;
 use Spiral\Idempotency\Driver\Redis\RedisCommands;
 use Spiral\Idempotency\Exception\IdempotencyException;
+use Spiral\Idempotency\Exception\MisconfigurationException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\Guarantee;
@@ -66,13 +67,25 @@ final class RedisAtMostOnceDriverTest
         Assert::same($redis->calls[0]['args'][1], '5');
     }
 
-    public function aNonPositiveOperationTtlIsClampedToOneSecond(): void
+    #[DataSet([0], 'zero')]
+    #[DataSet([-1], 'negative')]
+    public function aNonPositiveOperationTtlThrowsBeforeTheEffect(int $ttl): void
     {
-        // SET ... EX 0 is a server error; the clamp mirrors the lease storage.
         $redis = new FakeRedisCommands();
-        $this->driver($redis)->execute('k', static fn(): string => 'v', new ExecuteOptions(ttl: 0));
+        $calls = 0;
 
-        Assert::same($redis->calls[0]['args'][1], '1');
+        try {
+            $this->driver($redis)->execute('k', static function () use (&$calls): string {
+                ++$calls;
+                return 'v';
+            }, new ExecuteOptions(ttl: $ttl));
+            Assert::fail('a non-positive operation ttl must throw');
+        } catch (MisconfigurationException $e) {
+            Assert::string((string) $e->getSolution())->contains('retentionTtl');
+        }
+
+        Assert::same($calls, 0);
+        Assert::same($redis->calls, []);
     }
 
     public function aThrowingEffectIsNotReRun(): void

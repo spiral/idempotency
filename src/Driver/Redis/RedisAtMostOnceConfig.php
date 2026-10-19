@@ -51,7 +51,7 @@ final class RedisAtMostOnceConfig extends StorageConfig
      * @param int<1, max> $retentionTtl dedup window, seconds: the marker's server-side TTL, counted from the
      *        claim. Choose a value safely longer than the longest operation plus the longest redelivery/replay
      *        delay; a value below 1 fails when the storage is built. `ttl:` on `#[Idempotent]` overrides it per
-     *        operation.
+     *        operation, and below 1 throws before the effect.
      * @param bool $cacheResult store the operation result and best-effort replay it on a duplicate
      *        (default off: a duplicate gets `null`)
      * @param Guarantee $guarantee declared guarantee (must be backable by the at-most-once driver)
