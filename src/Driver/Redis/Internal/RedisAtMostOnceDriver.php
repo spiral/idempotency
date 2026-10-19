@@ -124,24 +124,32 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
         }
 
         if ($this->cacheResult && $value !== null) {
-            $this->store($key, $redisKey, $marker, $value);
+            $this->store($key, $redisKey, $marker, $value, $ttl);
         }
 
         return $value;
     }
 
     /**
-     * Best-effort ONLY: the effect has already happened, so a failed write is logged rather than thrown —
+     * Best-effort ONLY: the effect has already happened, so a failed or lost write is logged rather than thrown —
      * an exception here would report a completed effect as failed, and its retry would be refused anyway.
      */
-    private function store(string $key, string $redisKey, string $marker, mixed $value): void
+    private function store(string $key, string $redisKey, string $marker, mixed $value, int $ttl): void
     {
         try {
-            $this->client->eval(
+            $stored = $this->client->eval(
                 self::STORE,
                 [$redisKey],
                 [$marker, self::RESULT . (string) $this->serializer->serialize($value)],
             );
+            if ((int) $stored !== 1) {
+                $this->logger?->warning(
+                    'Idempotency at-most-once result for key "{key}" was not cached: its marker expired or was '
+                    . 'claimed again before the effect finished (outlived the {ttl}s dedup window?), so a '
+                    . 'duplicate can run the effect again.',
+                    ['key' => $key, 'ttl' => $ttl],
+                );
+            }
         } catch (\Throwable $e) {
             $this->logger?->warning(
                 'Idempotency at-most-once result for key "{key}" was not cached; the effect ran, '

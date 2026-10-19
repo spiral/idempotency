@@ -204,6 +204,39 @@ final class RedisAtMostOnceDriverTest
         Assert::same($redis->store['amo:k']['value'], 'M:other');
     }
 
+    public function aLostResultWriteIsLogged(): void
+    {
+        $redis = new FakeRedisCommands();
+        $logger = $this->logger();
+        $driver = new RedisAtMostOnceDriver($redis, $this->tokens(), 'amo:', 60, cacheResult: true, logger: $logger);
+
+        $result = $driver->execute('k', static function () use ($redis): string {
+            $redis->store['amo:k'] = ['value' => 'M:other', 'ttlMs' => 1000];
+            return 'v';
+        });
+
+        Assert::same($result, 'v');
+        Assert::count($logger->records, 1);
+        Assert::same($logger->records[0]['level'], 'warning');
+        Assert::same(
+            $logger->records[0]['message'],
+            'Idempotency at-most-once result for key "{key}" was not cached: its marker expired or was '
+            . 'claimed again before the effect finished (outlived the {ttl}s dedup window?), so a '
+            . 'duplicate can run the effect again.',
+        );
+        Assert::same($logger->records[0]['context'], ['key' => 'k', 'ttl' => 60]);
+    }
+
+    public function aStoredResultLogsNothing(): void
+    {
+        $logger = $this->logger();
+        $driver = new RedisAtMostOnceDriver(new FakeRedisCommands(), $this->tokens(), 'amo:', cacheResult: true, logger: $logger);
+
+        $driver->execute('k', static fn(): string => 'v');
+
+        Assert::count($logger->records, 0);
+    }
+
     public function aFailedResultWriteIsLoggedAndTheValueStillReturned(): void
     {
         $failure = new \RuntimeException('connection lost');
