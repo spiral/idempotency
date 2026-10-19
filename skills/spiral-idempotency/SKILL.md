@@ -79,7 +79,7 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
   `volatile-*`/`allkeys-*` policy may evict markers) and AOF persistence; a failover to an async replica
   can still drop the latest markers. An early-lost marker re-runs the effect on a duplicate.
 - The Redis storages (lease and at-most-once) run on Valkey as well as Redis (lease: Redis 4.0+,
-  at-most-once: 3.2+); give each its own `keyPrefix` on a shared server, and never one that starts with
-  another's — e.g. not `idempotency:` with `idempotency:amo:`: the lease stores a hash, at-most-once a
-  string, so a shared key is silently refused or fails with `WRONGTYPE`.
+  at-most-once: tested on 3.2+); give each its own `keyPrefix` on a shared server, and never one that
+  starts with another's — e.g. not `idempotency:` with `idempotency:amo:`: the lease stores a hash,
+  at-most-once a string, so a shared key is silently refused or fails with `WRONGTYPE`.
 - The upsert dedup relies on `cycle/database >= 2.21` (MySQL/Postgres `DO NOTHING` fixes).

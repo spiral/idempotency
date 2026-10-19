@@ -25,7 +25,7 @@ use Spiral\Idempotency\StorageFactory;
  * eviction policy may drop markers (`volatile-ttl` the short-lived ones first), so the server needs
  * `maxmemory-policy noeviction` — a dedicated instance if a shared one must evict — and AOF persistence,
  * since a restart without it loses them. A failover to an asynchronously replicated replica can still lose
- * the latest claims. Works on Redis 3.2+ and Valkey.
+ * the latest claims. Runs on Valkey; tested on Redis 3.2+.
  *
  * Set {@see $cacheResult} to also store and replay the operation result — best-effort only: the result
  * is a second write after the effect, so a crash or a Redis error between the two loses the cache (not
