@@ -34,6 +34,17 @@ final readonly class RedisAtMostOnceFactory implements StorageFactory
             );
         }
 
+        // `int<1, max>` is a docblock promise only; a config built from env or an array can break it.
+        /** @var int $retentionTtl */
+        $retentionTtl = $config->retentionTtl;
+        if ($retentionTtl < 1) {
+            // The TTL is the whole dedup window: clamping it to one second would quietly turn the guard off.
+            throw new MisconfigurationException(
+                \sprintf('%s::$retentionTtl must be at least 1 second, got %d.', RedisAtMostOnceConfig::class, $retentionTtl),
+                'Set retentionTtl to a dedup window longer than the longest operation plus the redelivery delay.',
+            );
+        }
+
         return new RedisAtMostOnceDriver(
             RedisConnection::resolve($this->container, RedisAtMostOnceConfig::class),
             $services->tokens,

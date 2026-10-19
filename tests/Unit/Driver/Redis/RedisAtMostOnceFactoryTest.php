@@ -25,6 +25,7 @@ use Spiral\Serializer\Serializer\JsonSerializer;
 use Spiral\Serializer\Serializer\PhpSerializer;
 use Testo\Assert;
 use Testo\Codecov\Covers;
+use Testo\Data\DataSet;
 use Testo\Expect;
 use Testo\Test;
 
@@ -108,6 +109,20 @@ final class RedisAtMostOnceFactoryTest
         );
 
         new RedisAtMostOnceFactory(new Container())->create(new RedisAtMostOnceConfig(), $this->services());
+    }
+
+    #[DataSet([0])]
+    #[DataSet([-5])]
+    public function rejectsANonPositiveRetentionTtl(int $ttl): void
+    {
+        $container = new Container();
+        $container->bindSingleton(RedisCommands::class, new FakeRedisCommands());
+
+        Expect::exception(MisconfigurationException::class)->withMessage(
+            RedisAtMostOnceConfig::class . '::$retentionTtl must be at least 1 second, got ' . $ttl . '.',
+        );
+
+        new RedisAtMostOnceFactory($container)->create(new RedisAtMostOnceConfig(retentionTtl: $ttl), $this->services());
     }
 
     public function rejectsAForeignConfig(): void

@@ -66,11 +66,11 @@ final class RedisAtMostOnceDriverTest
         Assert::same($redis->calls[0]['args'][1], '5');
     }
 
-    public function aNonPositiveTtlIsClampedToOneSecond(): void
+    public function aNonPositiveOperationTtlIsClampedToOneSecond(): void
     {
         // SET ... EX 0 is a server error; the clamp mirrors the lease storage.
         $redis = new FakeRedisCommands();
-        $this->driver($redis, retentionTtl: 0)->execute('k', static fn(): string => 'v');
+        $this->driver($redis)->execute('k', static fn(): string => 'v', new ExecuteOptions(ttl: 0));
 
         Assert::same($redis->calls[0]['args'][1], '1');
     }
