@@ -27,7 +27,7 @@ use Testo\Test;
 #[Group('driver', 'driver-redis')]
 final class RedisAtMostOnceTest
 {
-    private const string PREFIX = 'idempotency-test:amo:';
+    private const string PREFIX = 'idempotency-amo-test:';
 
     private static int $sequence = 0;
 
