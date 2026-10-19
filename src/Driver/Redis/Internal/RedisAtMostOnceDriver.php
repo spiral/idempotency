@@ -154,12 +154,19 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
                 [$redisKey],
                 [$marker, self::RESULT . (string) $this->serializer->serialize($value)],
             );
-            if ((int) $stored !== 1) {
+            if ($stored === 0) {
                 $this->logger?->warning(
                     'Idempotency at-most-once result for key "{key}" was not cached: its marker expired or was '
                     . 'claimed again before the effect finished (outlived the {ttl}s dedup window?), so a '
                     . 'duplicate can run the effect again.',
                     ['key' => $key, 'ttl' => $ttl],
+                );
+            } elseif ($stored !== 1) {
+                // Not a reply the script returns, e.g. `false` from an adapter on a server error.
+                $this->logger?->warning(
+                    'Idempotency at-most-once result for key "{key}" may not be cached: unexpected reply '
+                    . '({replyType}) to the result write; the effect ran.',
+                    ['key' => $key, 'replyType' => \get_debug_type($stored), 'reply' => $stored],
                 );
             }
         } catch (\Throwable $e) {

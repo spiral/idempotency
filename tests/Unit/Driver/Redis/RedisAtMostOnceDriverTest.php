@@ -240,6 +240,32 @@ final class RedisAtMostOnceDriverTest
         Assert::same($logger->records[0]['context'], ['key' => 'k', 'ttl' => 60]);
     }
 
+    #[DataSet([false, 'bool'], 'false')]
+    #[DataSet([null, 'null'], 'nil')]
+    #[DataSet(['OK', 'string'], 'status string')]
+    public function anUnexpectedResultWriteReplyIsLoggedAsSuch(mixed $reply, string $type): void
+    {
+        $logger = $this->logger();
+        $driver = new RedisAtMostOnceDriver(
+            $this->replying([1], $reply),
+            $this->tokens(),
+            'amo:',
+            60,
+            cacheResult: true,
+            logger: $logger,
+        );
+
+        Assert::same($driver->execute('k', static fn(): string => 'v'), 'v');
+        Assert::count($logger->records, 1);
+        Assert::same($logger->records[0]['level'], 'warning');
+        Assert::same(
+            $logger->records[0]['message'],
+            'Idempotency at-most-once result for key "{key}" may not be cached: unexpected reply '
+            . '({replyType}) to the result write; the effect ran.',
+        );
+        Assert::same($logger->records[0]['context'], ['key' => 'k', 'replyType' => $type, 'reply' => $reply]);
+    }
+
     public function aStoredResultLogsNothing(): void
     {
         $logger = $this->logger();
@@ -346,16 +372,20 @@ final class RedisAtMostOnceDriverTest
         return new RedisAtMostOnceDriver($redis, $this->tokens(), 'amo:', $retentionTtl, cacheResult: $cacheResult);
     }
 
-    private function replying(mixed $reply): RedisCommands
+    /**
+     * Answers each `eval()` with the next reply in turn; the last one repeats.
+     */
+    private function replying(mixed ...$replies): RedisCommands
     {
-        return new class($reply) implements RedisCommands {
+        return new class(\array_values($replies)) implements RedisCommands {
             public function __construct(
-                private readonly mixed $reply,
+                /** @var list<mixed> */
+                private array $replies,
             ) {}
 
             public function eval(string $script, array $keys, array $args): mixed
             {
-                return $this->reply;
+                return \count($this->replies) > 1 ? \array_shift($this->replies) : $this->replies[0];
             }
 
             public function hgetall(string $key): array
