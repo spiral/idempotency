@@ -48,8 +48,12 @@ completion there is always a crash window, so any retry may re-run the effect. W
 Use the lease for non-transactional effects (calling a payment gateway, sending an email) and the
 inbox when the whole effect lives in your database (creating an order). The dedup-guard is for
 fire-and-forget jobs/events where the effect must run **at most once** and a crash between marker and
-effect may lose it — a duplicate gets `null` (or, with `cacheResult: true`, a best-effort cached
-result: the marker and the result are not committed atomically, so replay is not guaranteed).
+effect may lose it. A duplicate is never re-run and never handed an invented answer: with
+`cacheResult: true` it replays the stored result (a `null` result included), and when there is no
+outcome to replay — the cache is off, or the first run never reached the result write (the marker and
+the result are not committed atomically) — `execute()` throws `Exception\OutcomeUnknownException`. Each
+transport maps that signal: HTTP `409 Conflict` without `Retry-After`, gRPC `ABORTED` without a retry
+hint, a queue job is ACKed, an event listener is skipped.
 
 ### Quick start
 
@@ -187,8 +191,9 @@ curl -X POST /payments/charge -H 'Idempotency-Key: pay-42' -d 'amount=500'
 | First call | The action runs; the whole response is snapshotted. Headers: `Idempotency-Key`, `Idempotency-Replay: false` |
 | Retry after completion | The cached response is replayed byte-identically, `Idempotency-Replay: true`; the action does **not** run |
 | Retry while the first call is still in flight | `409 Conflict` + `Retry-After` (lease storages) |
+| `AtMostOnce` duplicate with no stored outcome (`cacheResult` off, or the first call never stored one) | `409 Conflict` **without** `Retry-After` — the same key never gets a different answer — with `Idempotency-Key`, `Idempotency-Replay: true` and a JSON body (`"error": "outcome_unknown"`); the action does **not** run |
 | No key supplied | `400 Bad Request` with a JSON body |
-| The action responded `5xx` | Not cached: the key is released and a retry re-runs the operation (configurable predicate of `HttpOutcomeMiddleware`) |
+| The action responded `5xx` | Lease: not cached — the key is released and a retry re-runs the operation (configurable predicate of `HttpOutcomeMiddleware`). Inbox and `AtMostOnce` never re-run: they store the `5xx` and replay it |
 
 By default `HttpKeyMiddleware` reads the `Idempotency-Key` header, then the `key` body/query field
 (both names are constructor-configurable).
@@ -272,7 +277,7 @@ namespaces the result, so two job types redelivered with the same broker id do n
 | Redelivery after completion | Deduplicated — the handler does **not** re-run (ExactlyOnce/AtLeastOnce), the job is ACKed |
 | Delivery while another worker holds the key | `LockedException` → `RetryableLockException` → the job is re-enqueued after the lock TTL (not dead-lettered) |
 | No key resolvable (bad payload/header) | `MissingKeyException` propagates — **not** retryable, so the job dead-letters instead of retrying forever |
-| `AtMostOnce` (dedup-guard) duplicate | The handler returns `null` → the job is ACKed (fire-once); this is the natural home for `AtMostOnce` |
+| `AtMostOnce` (dedup-guard) duplicate | The handler does **not** re-run and the job is ACKed (fire-once); this is the natural home for `AtMostOnce`. `QueueRetryMiddleware` turns the driver's `OutcomeUnknownException` into a `null` result, so the signal never reaches the retry policy — keep it in the stack |
 
 For transient **failure** retries (infra errors), compose Spiral's own `#[RetryPolicy]` attribute on
 the handler alongside `#[Idempotent]` — the two are orthogonal: idempotency dedups the effect, the
@@ -319,8 +324,9 @@ The client sends the key as metadata; the server-side key middleware reads `idem
 | Retry while the first call is in flight | `ABORTED` — the status gRPC recommends for "retry at a higher level" (the analog of HTTP `409`) — with a `google.rpc.RetryInfo` detail carrying the suggested delay (the analog of `Retry-After`) |
 | No key in the metadata | `INVALID_ARGUMENT` (the analog of HTTP `400`) |
 | The method threw a `GRPCException` | The **status** is snapshotted (code + message + details) and replayed identically, exact subclass included |
-| ... with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Not cached: the key is released and a retry re-runs (configurable predicate of `GrpcOutcomeMiddleware`) |
-| A dedup hit with no cached message (`AtMostOnce` duplicate, void operation) | The method's **declared response type** is returned empty — gRPC has no "empty ACK", and the bridge's invoker requires a `Message` |
+| ... with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Lease: not cached — the key is released and a retry re-runs (configurable predicate of `GrpcOutcomeMiddleware`). Inbox and `AtMostOnce` never re-run: they store the status and replay it |
+| `AtMostOnce` duplicate with no stored outcome (`cacheResult` off, or the first call never stored one) | `ABORTED` **without** the `RetryInfo` detail — the same key never gets a different answer — with `idempotency-replay: true`; the method does **not** run |
+| A `null` outcome (void operation, first call or replay) | The method's **declared response type** is returned empty — gRPC has no "empty ACK", and the bridge's invoker requires a `Message` |
 
 Unlike HTTP, no configuration is needed to keep a **failure** replay faithful: over gRPC a negative
 outcome *is* a status, and `code` + `message` + `details` is a complete, deterministic snapshot of what
@@ -407,6 +413,7 @@ The key can also come from the attribute's `key` arg-path, resolved over the sin
 | Re-dispatch of the same event | Each marked listener that completed is skipped; an unmarked one runs again |
 | One listener of the fan-out threw | The dispatcher stops at it (PSR-14 semantics); the re-dispatch skips the listeners that completed and re-runs only the failed one |
 | Concurrent dispatch of the same event | `LockedException` propagates untouched — the durable producer that dispatched the event owns the retry |
+| `AtMostOnce` duplicate with no stored outcome | The listener is skipped silently, like a completed one; the fan-out goes on |
 | Event with neither `key` path nor `HasIdempotencyKey` | `MissingKeyException` |
 
 A failing listener **releases** its key (`FailurePolicy::Release` is the events default), which is what
@@ -512,6 +519,11 @@ public function handle(string $transactionId): Receipt
     );
 }
 ```
+
+A replayed `null` is a stored outcome. An `AtMostOnce` storage with no outcome to replay throws
+`Exception\OutcomeUnknownException` (carrying the `key`) instead of returning `null`; catch it where
+"already consumed, answer unknown" needs handling. A lease storage still throws `LockedException` while
+another call holds the key.
 
 The programmatic path applies no automatic namespacing — compose the final key yourself
 (`KeyResolver` is available as a service and supports `parentKey` hierarchies for

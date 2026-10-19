@@ -127,7 +127,7 @@ Storage config classes (all data-only; the driver is picked by the config class)
 |---|---|---|
 | `Driver\Cycle\CycleLeaseConfig` | AtLeastOnce | `connection` (DBAL db name, null = default), `table` = `'idempotency'`, `lockTtl` = 30, `retentionTtl` = 86400, `heartbeatThreshold` = 0.5 |
 | `Driver\Cycle\CycleInboxConfig` | ExactlyOnce | `connection`, `table` = `'inbox'`, `transactionMode` = `TransactionMode::Exclusive`, `flushMode`, `retentionTtl` = null (keep forever) |
-| `Driver\Cycle\CycleAtMostOnceConfig` | AtMostOnce | `connection`, `table` = `'idempotency_at_most_once'`, `cacheResult` = false (duplicate gets `null`), `retentionTtl` = null |
+| `Driver\Cycle\CycleAtMostOnceConfig` | AtMostOnce | `connection`, `table` = `'idempotency_at_most_once'`, `cacheResult` = false (a duplicate gets `OutcomeUnknownException`; on, the result — `null` included — is stored and replayed best-effort), `retentionTtl` = null |
 | `Driver\Redis\RedisLeaseConfig` | AtLeastOnce | `keyPrefix` = `'idempotency:'`, `lockTtl` = 30, `retentionTtl` = 86400; needs a Redis connection in the container: a `Driver\Redis\RedisCommands` binding (three-command adapter over any Redis client) or `predis/predis` with a `\Predis\ClientInterface` binding; server-side TTL, no GC needed |
 | `Driver\Memory\MemoryLeaseConfig` | AtLeastOnce | `lockTtl` = 30, `retentionTtl` = 86400; a per-process PHP array — no connection, no schema, no GC. Dedup holds only inside the worker that acquired the lease and dies with the process: offer it for tests and local development, never for production traffic spread over several workers |
 
