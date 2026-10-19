@@ -68,7 +68,8 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
   AtLeastOnce.
 - Default `PhpSerializer` runs `unserialize()` on replay — the idempotency table/keyspace is the
   trust boundary. Multiple writers → bind a JSON `SerializerInterface` and keep results JSON-safe.
-- `5xx` (HTTP) / transient statuses (gRPC) are not cached by design — retries re-run.
+- `5xx` (HTTP) / transient statuses (gRPC) are not cached by design — retries re-run. Not on
+  AtMostOnce: its marker still refuses the retry, which gets `null` even with `cacheResult: true`.
 - A failing **queue** job releases its key by default (`FailurePolicy::Release`), an HTTP/gRPC failure
   is cached; set `failurePolicy:` on `#[Idempotent]` when the operation needs the other one.
 - Setting `retentionTtl` on inbox/at-most-once narrows the dedup window — swept records mean a

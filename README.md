@@ -49,7 +49,8 @@ Use the lease for non-transactional effects (calling a payment gateway, sending 
 inbox when the whole effect lives in your database (creating an order). The dedup-guard is for
 fire-and-forget jobs/events where the effect must run **at most once** and a crash between marker and
 effect may lose it — a duplicate gets `null` (or, with `cacheResult: true`, a best-effort cached
-result: the marker and the result are not committed atomically, so replay is not guaranteed).
+result: the marker and the result are not committed atomically, so replay is not guaranteed; a
+transient outcome such as a `5xx` is never cached).
 
 ### Quick start
 

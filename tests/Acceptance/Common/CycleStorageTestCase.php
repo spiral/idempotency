@@ -467,6 +467,22 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
         Assert::same($calls, 1);
     }
 
+    public function atMostOnceDoesNotCacheAnUncacheableResult(): void
+    {
+        $key = $this->key();
+        $driver = $this->atMostOnceDriver(cacheResult: true);
+        $calls = 0;
+        $op = static function () use (&$calls): Uncacheable {
+            ++$calls;
+            return new Uncacheable('transient');
+        };
+
+        Assert::same($driver->execute($key, $op), 'transient');
+        // The marker still refuses the re-run, but the transient value is not replayed.
+        Assert::null($driver->execute($key, $op));
+        Assert::same($calls, 1);
+    }
+
     // ----------------------------------------------------------------- bootloader wiring
 
     public function wiresLeaseAndInboxDriversFromConfig(): void
