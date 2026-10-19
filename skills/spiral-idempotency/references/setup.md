@@ -19,7 +19,7 @@ It reports:
   `>= 2.21` requirement for the upsert dedup);
 - which transports the project can use (HTTP / queue / gRPC / events) based on installed packages;
 - which database engines are configured (`app/config/database.php`: Postgres / MySQL / SQLite),
-  and whether docker-compose declares a `redis`/`valkey` service for the Redis lease;
+  and whether docker-compose declares a `redis`/`valkey` service for the Redis storages;
 - which idempotency bootloaders are already registered and whether
   `app/config/idempotency.php` already exists.
 
@@ -33,7 +33,7 @@ Decide from the report:
 |---|---|
 | `cycle/database` present | `CycleLeaseConfig` / `CycleInboxConfig` / `CycleAtMostOnceConfig` are available |
 | `cycle/database` < 2.21 | The `DO NOTHING` affected-row dedup is broken on MySQL/Postgres below that — tell the user an upgrade is required (their call to run it) |
-| A Redis client is present (`predis/predis`, `ext-redis`, any other) or a Redis service exists | `RedisLeaseConfig` is available for AtLeastOnce (no GC needed); a non-predis client needs a `Driver\Redis\RedisCommands` adapter binding |
+| A Redis client is present (`predis/predis`, `ext-redis`, any other) or a Redis/Valkey service exists | `RedisLeaseConfig` (AtLeastOnce) and `RedisAtMostOnceConfig` (AtMostOnce) are available, on Valkey or Redis (no GC needed); a non-predis client needs a `Driver\Redis\RedisCommands` adapter binding |
 | Neither a Redis client nor `cycle/database` is available (or the alias only has to work in tests / local development) | `MemoryLeaseConfig` backs AtLeastOnce in a per-process array — no connection, no schema; dedup is lost across workers, so it is never a production answer |
 | `spiral/queue` present | The queue transport applies (`QueueIdempotencyBootloader`) |
 | `spiral/roadrunner-bridge` + `spiral/roadrunner-grpc` present | The gRPC transport applies (`GrpcIdempotencyBootloader`) |
@@ -50,7 +50,7 @@ composer require spiral/idempotency
 
 That is the **only** package you may install on your own. Optional peers — `cycle/database`
 (bundled SQL driver), `spiral/interceptors` (the attribute path), `spiral/queue` (queue
-transport), `spiral/events` (PSR-14 listeners), `predis/predis` (Redis lease when the app has no Redis
+transport), `spiral/events` (PSR-14 listeners), `predis/predis` (Redis storages when the app has no Redis
 client to adapt), `spiral/cycle-bridge` (tables in the ORM schema) —
 are architecture decisions: if step 0 shows one is missing but needed, **ask the user for
 approval before installing it**; never `composer require` them unprompted.
@@ -129,6 +129,7 @@ Storage config classes (all data-only; the driver is picked by the config class)
 | `Driver\Cycle\CycleInboxConfig` | ExactlyOnce | `connection`, `table` = `'inbox'`, `transactionMode` = `TransactionMode::Exclusive`, `flushMode`, `retentionTtl` = null (keep forever) |
 | `Driver\Cycle\CycleAtMostOnceConfig` | AtMostOnce | `connection`, `table` = `'idempotency_at_most_once'`, `cacheResult` = false (duplicate gets `null`), `retentionTtl` = null |
 | `Driver\Redis\RedisLeaseConfig` | AtLeastOnce | `keyPrefix` = `'idempotency:'`, `lockTtl` = 30, `retentionTtl` = 86400; needs a Redis connection in the container: a `Driver\Redis\RedisCommands` binding (three-command adapter over any Redis client) or `predis/predis` with a `\Predis\ClientInterface` binding; server-side TTL, no GC needed |
+| `Driver\Redis\RedisAtMostOnceConfig` | AtMostOnce | `keyPrefix` = `'idempotency:amo:'`, `retentionTtl` = 86400 (the dedup window — mandatory, the marker always expires; a later duplicate re-executes), `cacheResult` = false (duplicate gets `null`; `true` = best-effort replay, written after the effect); Valkey or Redis, same connection binding as `RedisLeaseConfig` (only `eval()` is used); no GC needed |
 | `Driver\Memory\MemoryLeaseConfig` | AtLeastOnce | `lockTtl` = 30, `retentionTtl` = 86400; a per-process PHP array — no connection, no schema, no GC. Dedup holds only inside the worker that acquired the lease and dies with the process: offer it for tests and local development, never for production traffic spread over several workers |
 
 The declared guarantee is verified against the driver capability at bootstrap — a mismatch fails

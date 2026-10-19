@@ -103,7 +103,7 @@ $interesting = [
     'spiral/roadrunner-bridge' => 'RoadRunner dispatchers (queue/gRPC scopes)',
     'spiral/roadrunner-grpc'   => 'gRPC transport',
     'spiral/events'            => 'PSR-14 events transport',
-    'predis/predis'            => 'default client for the Redis/Valkey lease backend (RedisLeaseConfig)',
+    'predis/predis'            => 'default client for the Redis/Valkey backends (RedisLeaseConfig / RedisAtMostOnceConfig)',
     'psr/http-message'         => 'HTTP transport (PSR-7)',
     'psr/http-factory'         => 'HTTP transport (PSR-17, response snapshots)',
 ];
@@ -132,7 +132,7 @@ $redisClient = match (true) {
     \extension_loaded('redis') => 'ext-redis found: bind RedisCommands to an adapter over \\Redis',
     default => 'no Redis client found: bind RedisCommands to an adapter over the app\'s client, or install predis/predis',
 };
-$line($has('predis/predis') || \extension_loaded('redis'), 'Redis lease', "RedisLeaseConfig (AtLeastOnce only) — {$redisClient}");
+$line($has('predis/predis') || \extension_loaded('redis'), 'Redis/Valkey', "RedisLeaseConfig (AtLeastOnce) / RedisAtMostOnceConfig (AtMostOnce) — {$redisClient}");
 $line(true, 'Memory lease', 'MemoryLeaseConfig (AtLeastOnce, process-local) — no dependency; tests and local development only');
 
 // ---- Config files -----------------------------------------------------------------------------

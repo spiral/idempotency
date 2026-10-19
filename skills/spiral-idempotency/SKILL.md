@@ -17,7 +17,7 @@ behind semantic storage aliases. For anything not covered by this skill, read
 | Guarantee | Mechanism | Use when |
 |---|---|---|
 | **AtLeastOnce** | Lease: lock + fencing token, result cached and replayed | Default. External effects (payment gateway, email). Effect may repeat inside the crash window |
-| **AtMostOnce** | Dedup-guard: marker commits *before* the effect, duplicate is **refused** | Losing the effect is safer than repeating it (fire-once jobs). Duplicate gets `null` |
+| **AtMostOnce** | Dedup-guard: marker commits *before* the effect, duplicate is **refused** — SQL table (`CycleAtMostOnceConfig`) or Redis/Valkey `SET NX EX` (`RedisAtMostOnceConfig`) | Losing the effect is safer than repeating it (fire-once jobs). Duplicate gets `null` |
 | **ExactlyOnce** (effect) | Inbox: `INSERT ... ON CONFLICT DO NOTHING` + side-effect in **one DB transaction** | Only when the whole effect writes to the same database as the inbox record |
 
 ## Where to go
@@ -72,5 +72,8 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
 - A failing **queue** job releases its key by default (`FailurePolicy::Release`), an HTTP/gRPC failure
   is cached; set `failurePolicy:` on `#[Idempotent]` when the operation needs the other one.
 - Setting `retentionTtl` on inbox/at-most-once narrows the dedup window — swept records mean a
-  late duplicate re-executes.
+  late duplicate re-executes. `RedisAtMostOnceConfig` always has one (default 86400 s): its marker
+  expires server-side, so size it above the longest redelivery delay.
+- The Redis storages (lease and at-most-once) run on Valkey as well as Redis; give each its own
+  `keyPrefix` on a shared server.
 - The upsert dedup relies on `cycle/database >= 2.21` (MySQL/Postgres `DO NOTHING` fixes).
