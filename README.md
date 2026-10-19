@@ -134,7 +134,7 @@ Storage drivers available under `storages`:
 
 Both Redis configs take the connection from the container: a `Driver\Redis\RedisCommands` binding (an
 adapter over any client), else a `\Predis\ClientInterface` binding. The lease needs Redis 4.0+
-(multi-field `HSET`); the at-most-once marker is tested on Redis 3.2+; any Valkey runs both. A fire-once
+(multi-field `HSET`); the at-most-once marker runs on Redis 3.2+; any Valkey runs both. A fire-once
 job storage on Valkey:
 
 ```php

@@ -70,9 +70,9 @@ final readonly class CycleAtMostOnceDriver implements Idempotency, GuaranteeProv
     public function execute(string $key, \Closure $operation, ?ExecuteOptions $options = null): mixed
     {
         // $options TTLs are intentionally ignored: the marker is terminal from the moment it commits
-        // (no lease, no PROCESSING, no expiry). $ttl is reserved for a future retention/GC. So is
-        // $failurePolicy: releasing the key after a failure would let the effect run twice, which is the
-        // one thing this guarantee forbids.
+        // (no lease, no PROCESSING, no expiry); retention is the config's retentionTtl, swept by the GC.
+        // $failurePolicy is ignored too: releasing the key after a failure would let the effect run twice,
+        // which is the one thing this guarantee forbids.
         /** @var non-empty-string $key */
         $db = ($this->database)();
 
