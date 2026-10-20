@@ -9,8 +9,12 @@ customize the mapping.
 | Kind | Default mapping | Lease reaction |
 |---|---|---|
 | **Domain** | any other `\Exception`, or a `RetryableExceptionInterface` that is **not** retryable | Cached as a valid negative outcome, replayed on retry |
-| **Infrastructure** | `\Error`, `\Exception` implementing `Retryable`, or a retryable `RetryableExceptionInterface` | Key released; the transport/client retries |
+| **Infrastructure** | `\Error`, `\Exception` implementing `Retryable`, a retryable `RetryableExceptionInterface`, or a `LockedException` / `OutcomeUnknownException` | Key released; the transport/client retries |
 | **Bug** | only via explicit config: `DefaultFailureClassifier(bugExceptions: [...])` | Key released; no re-enqueue — report and fix |
+
+A `LockedException` / `OutcomeUnknownException` thrown by the operation comes from a nested
+idempotent call: it is the inner key's state, not this operation's outcome, so the outer key is
+released rather than caching it for the retention TTL, and a retry re-runs.
 
 `RetryableExceptionInterface` is `spiral/queue`'s own retry contract: a job exception that already
 states its retry intent for the broker is read the same way here, so it needs no second marker. The

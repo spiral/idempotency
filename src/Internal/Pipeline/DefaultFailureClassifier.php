@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spiral\Idempotency\Internal\Pipeline;
 
+use Spiral\Idempotency\Exception\LockedException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\Pipeline\FailureClassifier;
 use Spiral\Idempotency\Pipeline\FailureKind;
 use Spiral\Idempotency\Pipeline\Retryable;
@@ -13,6 +15,9 @@ use Spiral\Queue\Exception\RetryableExceptionInterface;
  * Default, replaceable classifier:
  *
  *   RetryableExceptionInterface        → Infrastructure when `isRetryable()`, Domain otherwise
+ *   LockedException, OutcomeUnknownException
+ *                                      → Infrastructure (a nested idempotent call's state, not this
+ *                                        operation's outcome: caching it would outlive the inner key)
  *   \Error (and subclasses)            → Infrastructure (retry: a redeploy between attempts may fix it)
  *   \Exception + Retryable    → Infrastructure
  *   \Exception (everything else)       → Domain      ⚠ caches un-tagged infra for the retention TTL
@@ -56,7 +61,7 @@ final class DefaultFailureClassifier implements FailureClassifier
             return $e->isRetryable() ? FailureKind::Infrastructure : FailureKind::Domain;
         }
 
-        if ($e instanceof \Error) {
+        if ($e instanceof LockedException || $e instanceof OutcomeUnknownException || $e instanceof \Error) {
             return FailureKind::Infrastructure;
         }
 

@@ -10,6 +10,7 @@ use Spiral\Idempotency\Exception\CachedDomainFailureException;
 use Spiral\Idempotency\Exception\IdempotencyException;
 use Spiral\Idempotency\Exception\LeaseLostException;
 use Spiral\Idempotency\Exception\LockedException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\IdempotencyContext;
@@ -20,6 +21,7 @@ use Spiral\Idempotency\Internal\Pipeline\DefaultFailureClassifier;
 use Spiral\Idempotency\Lease\AcquireResult;
 use Spiral\Idempotency\Lease\Acquired;
 use Spiral\Idempotency\Lease\LeaseManager;
+use Spiral\Idempotency\Lease\Locked;
 use Spiral\Idempotency\Lease\LeaseStorage;
 use Spiral\Idempotency\Lease\StoredEntry;
 use Spiral\Idempotency\Pipeline\Middleware\ClassifierMiddleware;
@@ -275,6 +277,42 @@ final class LeaseIdempotencyTest
             }
         }
 
+        Assert::same($calls, 2);
+    }
+
+    public function nestedOutcomeUnknownIsNotCachedAsTheOuterOutcome(): void
+    {
+        $this->assertNestedSignalFreesTheOuterKey(new OutcomeUnknownException('inner'));
+    }
+
+    public function nestedLockedIsNotCachedAsTheOuterOutcome(): void
+    {
+        $this->assertNestedSignalFreesTheOuterKey(
+            new LockedException(new Locked('inner', 5, new \DateTimeImmutable())),
+        );
+    }
+
+    /**
+     * A nested idempotent call's signal under the Cache policy: the outer key must stay free, so the retry
+     * re-runs instead of replaying the inner call's transient state as a cached domain failure.
+     */
+    private function assertNestedSignalFreesTheOuterKey(\Throwable $nested): void
+    {
+        $driver = $this->driver();
+        $options = new ExecuteOptions(failurePolicy: FailurePolicy::Cache);
+        $calls = 0;
+        $op = static function () use (&$calls, $nested): string {
+            return ++$calls === 1 ? throw $nested : 'done';
+        };
+
+        try {
+            $driver->execute('outer', $op, $options);
+            Assert::fail('the nested signal must propagate on the first run');
+        } catch (\Throwable $e) {
+            Assert::same($e, $nested);
+        }
+
+        Assert::same($driver->execute('outer', $op, $options), 'done');
         Assert::same($calls, 2);
     }
 
