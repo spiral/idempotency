@@ -28,8 +28,8 @@ use Spiral\Idempotency\Uncacheable;
  *  - rebuilds the response from the snapshot on the way out (via PSR-17 factories) and adds the
  *    `Idempotency-Key` / `Idempotency-Replay` headers;
  *  - turns a {@see LockedException} into `409 Conflict` + `Retry-After`;
- *  - turns an {@see OutcomeUnknownException} (an AtMostOnce duplicate with nothing to replay) into
- *    `409 Conflict` WITHOUT `Retry-After` — a retry under the same key never gets a different answer;
+ *  - turns an {@see OutcomeUnknownException} (an AtMostOnce duplicate with no stored outcome) into
+ *    `409 Conflict` WITHOUT `Retry-After` — nothing tells when, or whether, an outcome gets stored;
  *  - turns a {@see MissingKeyException} into `400 Bad Request` (a missing key is a client error, not a 500);
  *  - wraps a non-cacheable response (default: status >= 500, transient) in {@see Uncacheable}, so the
  *    lease handler releases the key and a retry re-runs instead of replaying the error forever (the
@@ -244,8 +244,9 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
     }
 
     /**
-     * The duplicate is answered from the record of the first request, hence the replay header; there is
-     * no `Retry-After` because nothing will ever change that record.
+     * The duplicate is answered from the record of the first request, hence the replay header. No
+     * `Retry-After`: the first run may still be running, or have crashed or thrown, and nothing tells
+     * when — or whether — an outcome gets stored.
      *
      * @param non-empty-string $key
      */
@@ -253,7 +254,7 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
     {
         $payload = (string) \json_encode([
             'error' => 'outcome_unknown',
-            'message' => 'Request with this idempotency key was already processed; its outcome is not available.',
+            'message' => 'The outcome of the original request with this idempotency key is not available.',
         ]);
 
         $response = $this->responses->createResponse(409)

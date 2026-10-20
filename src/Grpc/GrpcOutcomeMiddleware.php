@@ -37,9 +37,9 @@ use Spiral\RoadRunner\GRPC\StatusCode;
  *    {@see GRPCException} with {@see StatusCode::ABORTED} — the gRPC status the spec recommends for
  *    "retry at a higher level", the analog of the HTTP `409 Conflict` — carrying a
  *    {@see RetryInfo} detail with the suggested delay (the analog of `Retry-After`);
- *  - turns an {@see OutcomeUnknownException} (an AtMostOnce duplicate with nothing to replay) into
- *    {@see StatusCode::ABORTED} WITHOUT a {@see RetryInfo} detail, marked as a replay — a retry under the
- *    same key never gets a different answer;
+ *  - turns an {@see OutcomeUnknownException} (an AtMostOnce duplicate with no stored outcome) into
+ *    {@see StatusCode::ABORTED} WITHOUT a {@see RetryInfo} detail, marked as a replay — nothing tells
+ *    when, or whether, an outcome gets stored;
  *  - turns a {@see MissingKeyException} into {@see StatusCode::INVALID_ARGUMENT} (a client error, the
  *    analog of HTTP `400 Bad Request`);
  *  - materializes the method's declared response for a `null` outcome (a void operation, replayed or
@@ -157,7 +157,7 @@ final readonly class GrpcOutcomeMiddleware implements ResolutionMiddleware
             $this->mark($call->context, $e->key, replayed: true);
 
             throw new GRPCException(
-                'Request with this idempotency key was already processed; its outcome is not available.',
+                'The outcome of the original request with this idempotency key is not available.',
                 StatusCode::ABORTED,
                 previous: $e,
             );

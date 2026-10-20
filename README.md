@@ -49,11 +49,12 @@ Use the lease for non-transactional effects (calling a payment gateway, sending 
 inbox when the whole effect lives in your database (creating an order). The dedup-guard is for
 fire-and-forget jobs/events where the effect must run **at most once** and a crash between marker and
 effect may lose it. A duplicate is never re-run and never handed an invented answer: with
-`cacheResult: true` it replays the stored result (a `null` result included), and when there is no
-outcome to replay — the cache is off, or the first run never reached the result write (the marker and
-the result are not committed atomically) — `execute()` throws `Exception\OutcomeUnknownException`. Each
-transport maps that signal: HTTP `409 Conflict` without `Retry-After`, gRPC `ABORTED` without a retry
-hint, a queue job is ACKed, an event listener is skipped.
+`cacheResult: true` it replays the stored result (a `null` result included), and when no outcome is
+stored — the cache is off, or the first run has not written its result (it may still be running, or
+it crashed or threw: the marker and the result are not committed atomically) — `execute()` throws
+`Exception\OutcomeUnknownException`. Without the cache no outcome is ever stored; with it, a later
+retry may replay one. Each transport maps that signal: HTTP `409 Conflict` without `Retry-After`, gRPC
+`ABORTED` without a retry hint, a queue job is ACKed, an event listener is skipped.
 
 ### Quick start
 
@@ -191,7 +192,7 @@ curl -X POST /payments/charge -H 'Idempotency-Key: pay-42' -d 'amount=500'
 | First call | The action runs; the whole response is snapshotted. Headers: `Idempotency-Key`, `Idempotency-Replay: false` |
 | Retry after completion | The cached response is replayed byte-identically, `Idempotency-Replay: true`; the action does **not** run |
 | Retry while the first call is still in flight | `409 Conflict` + `Retry-After` (lease storages) |
-| `AtMostOnce` duplicate with no stored outcome (`cacheResult` off, or the first call never stored one) | `409 Conflict` **without** `Retry-After` — the same key never gets a different answer — with `Idempotency-Key`, `Idempotency-Replay: true` and a JSON body (`"error": "outcome_unknown"`); the action does **not** run |
+| `AtMostOnce` duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `409 Conflict` **without** `Retry-After` — nothing tells when, or whether, an outcome gets stored: never without `cacheResult`, a later retry may replay one with it — with `Idempotency-Key`, `Idempotency-Replay: true` and a JSON body (`"error": "outcome_unknown"`); the action does **not** run |
 | No key supplied | `400 Bad Request` with a JSON body |
 | The action responded `5xx` | Lease: not cached — the key is released and a retry re-runs the operation (configurable predicate of `HttpOutcomeMiddleware`). Inbox and `AtMostOnce` never re-run: they store the `5xx` and replay it |
 
@@ -325,7 +326,7 @@ The client sends the key as metadata; the server-side key middleware reads `idem
 | No key in the metadata | `INVALID_ARGUMENT` (the analog of HTTP `400`) |
 | The method threw a `GRPCException` | The **status** is snapshotted (code + message + details) and replayed identically, exact subclass included |
 | ... with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Lease: not cached — the key is released and a retry re-runs (configurable predicate of `GrpcOutcomeMiddleware`). Inbox and `AtMostOnce` never re-run: they store the status and replay it |
-| `AtMostOnce` duplicate with no stored outcome (`cacheResult` off, or the first call never stored one) | `ABORTED` **without** the `RetryInfo` detail — the same key never gets a different answer — with `idempotency-replay: true`; the method does **not** run |
+| `AtMostOnce` duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `ABORTED` **without** the `RetryInfo` detail — nothing tells when, or whether, an outcome gets stored: never without `cacheResult`, a later retry may replay one with it — with `idempotency-replay: true`; the method does **not** run |
 | A `null` outcome (void operation, first call or replay) | The method's **declared response type** is returned empty — gRPC has no "empty ACK", and the bridge's invoker requires a `Message` |
 
 Unlike HTTP, no configuration is needed to keep a **failure** replay faithful: over gRPC a negative
@@ -520,9 +521,10 @@ public function handle(string $transactionId): Receipt
 }
 ```
 
-A replayed `null` is a stored outcome. An `AtMostOnce` storage with no outcome to replay throws
+A replayed `null` is a stored outcome. An `AtMostOnce` storage with no stored outcome throws
 `Exception\OutcomeUnknownException` (carrying the `key`) instead of returning `null`; catch it where
-"already consumed, answer unknown" needs handling. A lease storage still throws `LockedException` while
+"already consumed, answer unknown" needs handling. Without `cacheResult` that holds for good; with it,
+the first run may still be running, and a later retry may replay its result. A lease storage still throws `LockedException` while
 another call holds the key.
 
 The programmatic path applies no automatic namespacing — compose the final key yourself

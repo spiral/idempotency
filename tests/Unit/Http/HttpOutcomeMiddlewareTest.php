@@ -52,7 +52,7 @@ final class HttpOutcomeMiddlewareTest
         $response = $this->answer(new OutcomeUnknownException('k'));
 
         Assert::same($response->getStatusCode(), 409);
-        // Retrying the same key never yields a different answer, so there is nothing to wait for.
+        // Unlike a lock, nothing tells when, or whether, an outcome gets stored.
         Assert::false($response->hasHeader('Retry-After'));
         Assert::same($response->getHeaderLine('Idempotency-Key'), 'k');
         Assert::same($response->getHeaderLine('Idempotency-Replay'), 'true');

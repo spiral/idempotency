@@ -295,7 +295,7 @@ final class GrpcOutcomeMiddlewareTest
         Assert::notNull($thrown);
         Assert::same($thrown->getCode(), StatusCode::ABORTED);
         Assert::same($thrown->getPrevious(), $unknown);
-        // No RetryInfo: unlike a lock, retrying the same key never yields a different answer.
+        // No RetryInfo: unlike a lock, nothing tells when, or whether, an outcome gets stored.
         Assert::same($thrown->getDetails(), []);
         Assert::same($headers->get('idempotency-replay'), 'true');
         Assert::same($headers->get('idempotency-key'), 'k');

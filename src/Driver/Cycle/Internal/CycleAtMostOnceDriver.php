@@ -119,7 +119,8 @@ final readonly class CycleAtMostOnceDriver implements Idempotency, GuaranteeProv
      * A duplicate: the effect already ran (or was lost). Replays the stored result when there is one.
      *
      * @param non-empty-string $key
-     * @throws OutcomeUnknownException when the result cache is off, or the first caller never stored one
+     * @throws OutcomeUnknownException when the result cache is off, or the first caller has not stored one
+     *         (still running, crashed or threw)
      */
     private function replay(DatabaseInterface $db, string $key): mixed
     {

@@ -21,7 +21,7 @@ interface Idempotency
      * instead of executing the operation again.
      *
      * A replayed `null` is a stored outcome. A duplicate whose first outcome is not available — an
-     * AtMostOnce storage without its result cache, or whose first run never stored one — throws
+     * AtMostOnce storage without its result cache, or whose first run has not stored one — throws
      * {@see Exception\OutcomeUnknownException} instead: the operation is not re-run and no answer is
      * invented.
      *

@@ -90,7 +90,7 @@ curl -X POST /payments/charge -H 'Idempotency-Key: pay-42' -d 'amount=500'
 | First call | Runs; whole response snapshotted. `Idempotency-Key` + `Idempotency-Replay: false` headers |
 | Retry after completion | Cached response replayed byte-identically, `Idempotency-Replay: true`; the action does **not** run |
 | Concurrent retry (first call in flight) | `409 Conflict` + `Retry-After` (lease storages) |
-| AtMostOnce duplicate with no stored outcome | `409 Conflict` **without** `Retry-After`, `Idempotency-Replay: true`, JSON `"error": "outcome_unknown"`; the action does **not** run |
+| AtMostOnce duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `409 Conflict` **without** `Retry-After` (never an outcome without `cacheResult`; with it a later retry may replay one), `Idempotency-Replay: true`, JSON `"error": "outcome_unknown"`; the action does **not** run |
 | No key supplied | `400 Bad Request` with a JSON body |
 | Action responded `5xx` | Lease: **not cached** — key released, a retry re-runs (the `cacheable` predicate of `HttpOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the `5xx` is stored and replayed |
 
@@ -143,7 +143,7 @@ Key from the `idempotency-key` metadata entry (case-insensitive; configurable vi
 | No key in metadata | `INVALID_ARGUMENT` |
 | Method threw a `GRPCException` | The status (code + message + details) is snapshotted and replayed, exact subclass included |
 | ...with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Lease: not cached — key released, a retry re-runs (predicate of `GrpcOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the status is stored and replayed |
-| AtMostOnce duplicate with no stored outcome | `ABORTED` **without** the `RetryInfo` detail, `idempotency-replay: true`; the method does **not** run |
+| AtMostOnce duplicate with no stored outcome (as for HTTP) | `ABORTED` **without** the `RetryInfo` detail, `idempotency-replay: true`; the method does **not** run |
 | A `null` outcome (void op, first call or replay) | The method's declared response type is returned empty |
 
 Bind `Grpc\DomainFailureMapper` only if the service throws plain domain exceptions
@@ -243,9 +243,11 @@ $this->registry->get('payments')->execute(
 No automatic namespacing here — compose the final key yourself (`KeyResolver` is a
 service and supports `parentKey` hierarchies for multi-step chains).
 
-A replayed `null` is a stored outcome. An AtMostOnce storage with nothing to replay (`cacheResult`
-off, or the first run never stored a result) throws `Exception\OutcomeUnknownException` (with `->key`)
-instead of returning `null` — catch it where "already consumed, answer unknown" needs handling. A lease
+A replayed `null` is a stored outcome. An AtMostOnce storage with no stored outcome (`cacheResult`
+off; or on, and the first run is still running, crashed or threw before storing one) throws
+`Exception\OutcomeUnknownException` (with `->key`) instead of returning `null` — catch it where
+"already consumed, answer unknown" needs handling. Without `cacheResult` no outcome is ever stored;
+with it, a later retry may replay one. A lease
 storage throws `LockedException` while another call holds the key.
 
 ## Long-running operations
