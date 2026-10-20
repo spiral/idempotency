@@ -9,6 +9,7 @@ use Spiral\Core\CompatiblePipelineBuilder;
 use Spiral\Core\Container;
 use Spiral\Idempotency\Attribute\Idempotent;
 use Spiral\Idempotency\Config\IdempotencyConfig;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Grpc\GrpcKeyMiddleware;
 use Spiral\Idempotency\Grpc\GrpcOutcomeMiddleware;
@@ -31,9 +32,11 @@ use Spiral\RoadRunnerBridge\GRPC\Internal\Dispatcher;
 use Spiral\RoadRunnerBridge\GRPC\Internal\Invoker;
 use Spiral\RoadRunner\GRPC\Context;
 use Spiral\RoadRunner\GRPC\ContextInterface;
+use Spiral\RoadRunner\GRPC\Exception\GRPCException;
 use Spiral\RoadRunner\GRPC\Method;
 use Spiral\RoadRunner\GRPC\ResponseHeaders;
 use Spiral\RoadRunner\GRPC\ServiceInterface;
+use Spiral\RoadRunner\GRPC\StatusCode;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Test;
@@ -57,10 +60,10 @@ final class PingService implements ServiceInterface
 }
 
 /**
- * A fire-once (AtMostOnce-shaped) driver: runs the operation the first time and answers `null` for every
- * duplicate — the shape that has no room in gRPC, where the invoker demands a Message.
+ * Replays a stored `null` for every duplicate — the outcome a void operation leaves, which has no room in
+ * gRPC, where the invoker demands a Message.
  */
-final class FireOnceDriverStub implements Idempotency
+final class NullReplayDriverStub implements Idempotency
 {
     /** @var array<string, true> */
     private array $seen = [];
@@ -74,6 +77,17 @@ final class FireOnceDriverStub implements Idempotency
         $this->seen[$key] = true;
 
         return $operation(new StubIdempotencyContext($key));
+    }
+}
+
+/**
+ * An AtMostOnce duplicate with no stored outcome: the key is consumed, and there is nothing to replay.
+ */
+final class OutcomeUnknownDriverStub implements Idempotency
+{
+    public function execute(string $key, \Closure $operation, ?ExecuteOptions $options = null): mixed
+    {
+        throw new OutcomeUnknownException($key);
     }
 }
 
@@ -186,12 +200,12 @@ final class BridgeIntegrationTest
 
     public function nullOutcomeSatisfiesTheInvokersMessageContract(): void
     {
-        // `Invoker::resultToString(Message $result)`: a duplicate that answers null would raise a TypeError,
-        // which the server reports as a worker error rather than a status. The middleware materializes the
-        // response type the method declares instead.
+        // `Invoker::resultToString(Message $result)`: a replayed null (a void operation's outcome) would raise
+        // a TypeError, which the server reports as a worker error rather than a status. The middleware
+        // materializes the response type the method declares instead.
         $service = new PingService();
         $method = Method::parse(new \ReflectionMethod($service, 'Ping'));
-        $invoker = $this->invoker(new Container(), new FireOnceDriverStub(), Guarantee::AtMostOnce);
+        $invoker = $this->invoker(new Container(), new NullReplayDriverStub(), Guarantee::AtLeastOnce);
         $input = (new StringValue(['value' => 'ping']))->serializeToString();
 
         $invoker->invoke($service, $method, $this->context(new ResponseHeaders()), $input);
@@ -200,6 +214,31 @@ final class BridgeIntegrationTest
         Assert::same($service->calls, 1);
         // A valid, empty StringValue on the wire — not an exception, and identical on every duplicate.
         Assert::same($this->decode($duplicate)->getValue(), '');
+    }
+
+    public function outcomeUnknownIsAnAbortedStatusThroughTheRealInvoker(): void
+    {
+        // The status must leave the invoker as a GRPCException — `Server::serve()` turns only that into a
+        // wire status — with the replay marked in the header bag the server packs into the reply.
+        $service = new PingService();
+        $method = Method::parse(new \ReflectionMethod($service, 'Ping'));
+        $invoker = $this->invoker(new Container(), new OutcomeUnknownDriverStub(), Guarantee::AtMostOnce);
+        $input = (new StringValue(['value' => 'ping']))->serializeToString();
+        $headers = new ResponseHeaders();
+
+        $thrown = null;
+        try {
+            $invoker->invoke($service, $method, $this->context($headers), $input);
+            Assert::fail('an unknown outcome must surface as a gRPC status');
+        } catch (GRPCException $e) {
+            $thrown = $e;
+        }
+
+        Assert::notNull($thrown);
+        Assert::same($thrown->getCode(), StatusCode::ABORTED);
+        Assert::same($thrown->getDetails(), []);
+        Assert::same($headers->get('idempotency-replay'), 'true');
+        Assert::same($service->calls, 0);
     }
 
     public function dispatcherScopeIsTheOneWeBindInto(): void
