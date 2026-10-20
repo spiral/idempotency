@@ -324,7 +324,6 @@ final class GrpcOutcomeMiddlewareTest
 
     public function nestedLockedIsStillAbortedWithRetryInfo(): void
     {
-        // A nested lock released this call's own key: "ABORTED, retry after N" holds for it too.
         $middleware = new GrpcOutcomeMiddleware();
         $locked = new LockedException(new Locked('inner', 7, new \DateTimeImmutable()));
         $call = $this->call(static fn(): never => throw $locked);

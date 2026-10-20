@@ -87,8 +87,8 @@ final class HttpOutcomeMiddlewareTest
 
     public function nestedLockedIsAConflictUnderTheOwnKey(): void
     {
-        // A nested lock released this request's own key: "409, retry after N" holds for it too, but the
-        // inner key must not leak into this request's headers.
+        // A nested lock still maps to 409 + Retry-After, but the inner key must not leak into this request's
+        // headers.
         $locked = new LockedException(new Locked('inner', 7, new \DateTimeImmutable()));
         $call = new IdempotencyCall(
             context: new \stdClass(),

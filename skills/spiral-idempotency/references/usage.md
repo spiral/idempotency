@@ -93,7 +93,7 @@ curl -X POST /payments/charge -H 'Idempotency-Key: pay-42' -d 'amount=500'
 | AtMostOnce duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `409 Conflict` **without** `Retry-After` (with `cacheResult` off no outcome is ever stored; with it on, a later retry may replay one), `Idempotency-Replay: true`, JSON `"error": "outcome_unknown"`; the action does **not** run |
 | No key supplied | `400 Bad Request` with a JSON body |
 | Nested idempotent call inside the action is locked | `409` + `Retry-After` under the request's **own** `Idempotency-Key`, message "An operation this request depends on is already being processed." |
-| Nested idempotent call throws `OutcomeUnknownException` | Rethrown (`500` by default), not a duplicate answer; a lease outer key caches a final one, releases a non-final one (`failures-and-gc.md`) |
+| Nested idempotent call throws `OutcomeUnknownException` | Not a duplicate answer. A final one is Domain: a bound `DomainFailureRenderer` may render it into a cached, replayed response; otherwise rethrown (`500` by default). A lease outer key caches a final one, releases a non-final one, which is always rethrown (`failures-and-gc.md`) |
 | Action responded `5xx` | Lease: **not cached** — key released, a retry re-runs (the `cacheable` predicate of `HttpOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the inbox (and AtMostOnce with `cacheResult`) stores and replays the `5xx`; without `cacheResult` an AtMostOnce duplicate gets the `409` above |
 
 ## Queue / jobs
@@ -146,7 +146,7 @@ Key from the `idempotency-key` metadata entry (case-insensitive; configurable vi
 | Concurrent retry | `ABORTED` + `google.rpc.RetryInfo` detail with the suggested delay |
 | No key in metadata | `INVALID_ARGUMENT` |
 | Nested idempotent call inside the method is locked | `ABORTED` + `RetryInfo`, message "An operation this request depends on is already being processed (retry after Ns)." |
-| Nested idempotent call throws `OutcomeUnknownException` | Rethrown — a worker error, not a status; a lease outer key caches a final one, releases a non-final one |
+| Nested idempotent call throws `OutcomeUnknownException` | Not a duplicate answer. A final one is Domain: a bound `DomainFailureMapper` may map it to a snapshotted, replayed status; otherwise rethrown — a worker error, not a status. A lease outer key caches a final one, releases a non-final one, which is always rethrown |
 | Method threw a `GRPCException` | The status (code + message + details) is snapshotted and replayed, exact subclass included |
 | ...with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Lease: not cached — key released, a retry re-runs (predicate of `GrpcOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the inbox (and AtMostOnce with `cacheResult`) stores and replays the status; without `cacheResult` an AtMostOnce duplicate gets the `ABORTED` above |
 | AtMostOnce duplicate with no stored outcome (as for HTTP) | `ABORTED` **without** the `RetryInfo` detail, `idempotency-replay: true`; the method does **not** run |

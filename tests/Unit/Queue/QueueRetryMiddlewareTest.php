@@ -86,7 +86,6 @@ final class QueueRetryMiddlewareTest
 
     public function nestedLockedStillReEnqueuesTheJob(): void
     {
-        // A nested lock released this job's own key, so waiting for the inner lock and re-running is right.
         $middleware = new QueueRetryMiddleware();
         $locked = new LockedException(new Locked('inner', 7, new \DateTimeImmutable()));
         $call = new IdempotencyCall(
