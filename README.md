@@ -123,7 +123,11 @@ A `default` pointing at an alias absent from `storages` fails at bootstrap, not 
 `IdempotencyRegistry::execute()` usage below). Once one is registered, its own entry becomes
 mandatory: a missing `transports.<name>` throws `MisconfigurationException` on the first
 `#[Idempotent]` call instead of running an empty pipeline that deduplicates on nothing. An explicit
-`'http' => []` is valid — the key then comes only from the attribute.
+`'http' => []` is valid — the key then comes only from the attribute — but an empty stack also drops
+the transport's outcome mapping: the `Locked` → 409 / ABORTED / job re-enqueue and the AtMostOnce
+duplicate → 409 / ABORTED / job ACK translations live in the outcome middleware (`HttpOutcomeMiddleware`,
+`GrpcOutcomeMiddleware`, `QueueRetryMiddleware`). Without it those exceptions propagate unmapped — on
+the queue, to Spiral's retry policy as plain failures. Keep at least the outcome middleware.
 
 Storage drivers available under `storages`:
 
@@ -194,7 +198,7 @@ curl -X POST /payments/charge -H 'Idempotency-Key: pay-42' -d 'amount=500'
 | Retry while the first call is still in flight | `409 Conflict` + `Retry-After` (lease storages) |
 | `AtMostOnce` duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `409 Conflict` **without** `Retry-After` — nothing tells when, or whether, an outcome gets stored: never without `cacheResult`, a later retry may replay one with it — with `Idempotency-Key`, `Idempotency-Replay: true` and a JSON body (`"error": "outcome_unknown"`); the action does **not** run |
 | No key supplied | `400 Bad Request` with a JSON body |
-| The action responded `5xx` | Lease: not cached — the key is released and a retry re-runs the operation (configurable predicate of `HttpOutcomeMiddleware`). Inbox and `AtMostOnce` never re-run: they store the `5xx` and replay it |
+| The action responded `5xx` | Lease: not cached — the key is released and a retry re-runs the operation (configurable predicate of `HttpOutcomeMiddleware`). Inbox and `AtMostOnce` never re-run: the inbox (and `AtMostOnce` with `cacheResult`) stores the `5xx` and replays it; without `cacheResult` an `AtMostOnce` duplicate gets the `409` above |
 
 By default `HttpKeyMiddleware` reads the `Idempotency-Key` header, then the `key` body/query field
 (both names are constructor-configurable).
@@ -325,7 +329,7 @@ The client sends the key as metadata; the server-side key middleware reads `idem
 | Retry while the first call is in flight | `ABORTED` — the status gRPC recommends for "retry at a higher level" (the analog of HTTP `409`) — with a `google.rpc.RetryInfo` detail carrying the suggested delay (the analog of `Retry-After`) |
 | No key in the metadata | `INVALID_ARGUMENT` (the analog of HTTP `400`) |
 | The method threw a `GRPCException` | The **status** is snapshotted (code + message + details) and replayed identically, exact subclass included |
-| ... with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Lease: not cached — the key is released and a retry re-runs (configurable predicate of `GrpcOutcomeMiddleware`). Inbox and `AtMostOnce` never re-run: they store the status and replay it |
+| ... with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Lease: not cached — the key is released and a retry re-runs (configurable predicate of `GrpcOutcomeMiddleware`). Inbox and `AtMostOnce` never re-run: the inbox (and `AtMostOnce` with `cacheResult`) stores the status and replays it; without `cacheResult` an `AtMostOnce` duplicate gets the `ABORTED` above |
 | `AtMostOnce` duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `ABORTED` **without** the `RetryInfo` detail — nothing tells when, or whether, an outcome gets stored: never without `cacheResult`, a later retry may replay one with it — with `idempotency-replay: true`; the method does **not** run |
 | A `null` outcome (void operation, first call or replay) | The method's **declared response type** is returned empty — gRPC has no "empty ACK", and the bridge's invoker requires a `Message` |
 
@@ -626,7 +630,7 @@ Three ways to keep the replay identical to the first attempt, best first:
    Bind it in a bootloader (`DomainFailureRenderer::class => DeclineRenderer::class`) — the
    middleware picks it up by autowiring. Only `FailureKind::Domain` failures reach the renderer:
    Infrastructure and Bug ones stay exceptions, so the key is still released and a retry re-runs. The
-   `cacheable` predicate still applies, so a rendered 5xx is not cached either. Rows written *before*
+   `cacheable` predicate still applies, so a rendered 5xx is not cached on a lease either. Rows written *before*
    the renderer was bound keep replaying as a throw.
 3. **Map `CachedDomainFailureException::$originalClass`** in the application exception handler.
 

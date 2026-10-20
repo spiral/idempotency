@@ -33,7 +33,8 @@ use Spiral\Idempotency\Uncacheable;
  *  - turns a {@see MissingKeyException} into `400 Bad Request` (a missing key is a client error, not a 500);
  *  - wraps a non-cacheable response (default: status >= 500, transient) in {@see Uncacheable}, so the
  *    lease handler releases the key and a retry re-runs instead of replaying the error forever (the
- *    inbox and at-most-once storages never re-run: they store and replay it);
+ *    inbox and at-most-once storages never re-run: the inbox, and at-most-once with its result cache,
+ *    store and replay it);
  *  - with a {@see DomainFailureRenderer} bound, renders a THROWN domain failure into a response
  *    before it is cached, so a replay reproduces the same status (see below).
  *

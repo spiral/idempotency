@@ -92,7 +92,7 @@ curl -X POST /payments/charge -H 'Idempotency-Key: pay-42' -d 'amount=500'
 | Concurrent retry (first call in flight) | `409 Conflict` + `Retry-After` (lease storages) |
 | AtMostOnce duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `409 Conflict` **without** `Retry-After` (never an outcome without `cacheResult`; with it a later retry may replay one), `Idempotency-Replay: true`, JSON `"error": "outcome_unknown"`; the action does **not** run |
 | No key supplied | `400 Bad Request` with a JSON body |
-| Action responded `5xx` | Lease: **not cached** — key released, a retry re-runs (the `cacheable` predicate of `HttpOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the `5xx` is stored and replayed |
+| Action responded `5xx` | Lease: **not cached** — key released, a retry re-runs (the `cacheable` predicate of `HttpOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the inbox (and AtMostOnce with `cacheResult`) stores and replays the `5xx`; without `cacheResult` an AtMostOnce duplicate gets the `409` above |
 
 ## Queue / jobs
 
@@ -142,7 +142,7 @@ Key from the `idempotency-key` metadata entry (case-insensitive; configurable vi
 | Concurrent retry | `ABORTED` + `google.rpc.RetryInfo` detail with the suggested delay |
 | No key in metadata | `INVALID_ARGUMENT` |
 | Method threw a `GRPCException` | The status (code + message + details) is snapshotted and replayed, exact subclass included |
-| ...with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Lease: not cached — key released, a retry re-runs (predicate of `GrpcOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the status is stored and replayed |
+| ...with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Lease: not cached — key released, a retry re-runs (predicate of `GrpcOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the inbox (and AtMostOnce with `cacheResult`) stores and replays the status; without `cacheResult` an AtMostOnce duplicate gets the `ABORTED` above |
 | AtMostOnce duplicate with no stored outcome (as for HTTP) | `ABORTED` **without** the `RetryInfo` detail, `idempotency-replay: true`; the method does **not** run |
 | A `null` outcome (void op, first call or replay) | The method's declared response type is returned empty |
 

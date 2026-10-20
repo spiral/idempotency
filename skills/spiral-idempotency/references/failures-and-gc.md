@@ -91,7 +91,7 @@ by different code — over HTTP that means a **different status code**, unless y
    Bind it in a bootloader (`DomainFailureRenderer::class => DeclineRenderer::class`).
    Only `FailureKind::Domain` failures reach the renderer; Infrastructure and Bug ones stay
    exceptions (key released, retry re-runs). The `cacheable` predicate still applies — a rendered
-   5xx is not cached either. Rows written *before* the renderer was bound keep replaying as a throw.
+   5xx is not cached on a lease either. Rows written *before* the renderer was bound keep replaying as a throw.
 3. **Map `CachedDomainFailureException::$originalClass`** in the application exception handler.
 
 Over gRPC none of this is needed: a negative outcome *is* a status, and code + message + details is

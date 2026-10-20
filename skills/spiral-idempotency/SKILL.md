@@ -51,7 +51,8 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
 
 - Reference `IdempotencyInterceptor` (alias), never the concrete `PipelineIdempotencyInterceptor`.
 - Every registered transport bootloader needs its `transports.<name>` entry in config — `[]` is
-  valid, a missing one throws on the first `#[Idempotent]` call. The `transports` section as a whole
+  valid but drops the outcome middleware (no Locked / AtMostOnce-duplicate mapping — on the queue
+  neither re-enqueue nor ACK), a missing one throws on the first `#[Idempotent]` call. The `transports` section as a whole
   is optional (no transport bootloader → omit it). Events are the exception: no interceptor, no
   config entry.
 - `#[Idempotent]` without `storage:` takes the config's `default` alias; with no `default` set it
@@ -69,7 +70,8 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
 - Default `PhpSerializer` runs `unserialize()` on replay — the idempotency table/keyspace is the
   trust boundary. Multiple writers → bind a JSON `SerializerInterface` and keep results JSON-safe.
 - `5xx` (HTTP) / transient statuses (gRPC) are not cached on a **lease** storage — retries re-run.
-  Inbox and at-most-once never re-run: they store that answer and replay it.
+  Inbox and at-most-once never re-run: the inbox (and at-most-once with `cacheResult`) stores that
+  answer and replays it; without `cacheResult` an at-most-once duplicate gets 409 / ABORTED.
 - An AtMostOnce duplicate with no stored outcome is `OutcomeUnknownException`, not `null`: HTTP
   `409` without `Retry-After`, gRPC `ABORTED` without `RetryInfo`, queue ACK (needs
   `QueueRetryMiddleware` in the stack), event listener skipped; a direct `execute()` throws it.

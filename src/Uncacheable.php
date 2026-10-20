@@ -9,9 +9,11 @@ namespace Spiral\Idempotency;
  * to cache, signalling "safe to re-run". That holds for the lease only.
  *
  * The lease handler honours it: it releases the key (abort) and returns the unwrapped {@see $value}, so
- * a retry re-executes the operation. The storages that never re-run — the inbox and at-most-once — unwrap,
- * store and replay the value like any other: their record is already terminal (the inbox side-effect is
- * committed, the at-most-once marker precedes the effect), so a retry gets the same transient answer.
+ * a retry re-executes the operation. The storages that never re-run — the inbox and at-most-once — unwrap
+ * the value and treat it like any other: their record is already terminal (the inbox side-effect is
+ * committed, the at-most-once marker precedes the effect). The inbox stores and replays it, as does
+ * at-most-once with its result cache on; without the cache an at-most-once duplicate gets
+ * {@see Exception\OutcomeUnknownException}.
  *
  * @api
  */

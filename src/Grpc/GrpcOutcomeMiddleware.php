@@ -62,7 +62,8 @@ use Spiral\RoadRunner\GRPC\StatusCode;
  *
  * Transient statuses (see {@see self::TRANSIENT}) are NOT cached: they are wrapped in {@see Uncacheable},
  * so the lease handler releases the key and a retry re-runs, exactly like a 5xx response over HTTP. The
- * inbox and at-most-once storages never re-run: they store and replay the status.
+ * inbox and at-most-once storages never re-run: the inbox, and at-most-once with its result cache, store
+ * and replay the status.
  *
  * The gRPC server (`Spiral\RoadRunner\GRPC\Server`) catches `GRPCExceptionInterface` and turns its
  * `getCode()` into the wire status, so throwing {@see GRPCException} here is sufficient. Recommended as

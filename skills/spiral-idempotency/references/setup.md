@@ -113,8 +113,10 @@ Rules for the `transports` section (uncomment/add the entries for the project):
   and registers no transport bootloader omits it; an absent section reads as empty.
 - **Every transport whose bootloader is registered must have an entry** — `[]` is valid (the key
   then comes only from the attribute), but a *missing* one throws `MisconfigurationException` on
-  the first `#[Idempotent]` call. The events transport is the exception: it runs no middleware
-  stack, so it has no entry at all.
+  the first `#[Idempotent]` call. An empty stack also drops the outcome middleware, so `Locked` and
+  an AtMostOnce duplicate propagate unmapped (on the queue: no re-enqueue, no ACK — a plain failure
+  for the retry policy); keep at least the outcome middleware. The events transport is the
+  exception: it runs no middleware stack, so it has no entry at all.
 - **Middleware with constructor options** (a custom header name, `QueueKeyMiddleware`'s
   `fallbackToJobId: true` — see the queue section of `usage.md`) are bound as configured instances in
   a bootloader: the stack lists class names and resolves each through the container.
