@@ -118,8 +118,8 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
         try {
             $cached = $next($encoded);
         } catch (LockedException $e) {
-            // Not guarded like an unknown outcome: a nested lock released this request's own key (the
-            // classifier calls it Infrastructure), so "409, retry after N" holds for this request too.
+            // Unguarded: after a nested lock a lease key is free and an inbox one rolled back, so "retry
+            // after N" holds; an AtMostOnce key is consumed, and its retry gets the unknown-outcome 409.
             return $this->conflict($e->lock, $ownKey);
         } catch (OutcomeUnknownException $e) {
             // Thrown after the operation ran, it came from a nested idempotent call inside the action —

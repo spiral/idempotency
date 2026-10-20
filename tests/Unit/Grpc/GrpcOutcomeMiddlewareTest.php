@@ -343,6 +343,7 @@ final class GrpcOutcomeMiddlewareTest
         Assert::same($thrown->getCode(), StatusCode::ABORTED);
         Assert::same($thrown->getPrevious(), $locked);
         Assert::true(($thrown->getDetails()[0] ?? null) instanceof RetryInfo);
+        Assert::string($thrown->getMessage())->contains('depends on');
     }
 
     public function mapsMissingKeyToInvalidArgument(): void

@@ -92,6 +92,8 @@ curl -X POST /payments/charge -H 'Idempotency-Key: pay-42' -d 'amount=500'
 | Concurrent retry (first call in flight) | `409 Conflict` + `Retry-After` (lease storages) |
 | AtMostOnce duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `409 Conflict` **without** `Retry-After` (with `cacheResult` off no outcome is ever stored; with it on, a later retry may replay one), `Idempotency-Replay: true`, JSON `"error": "outcome_unknown"`; the action does **not** run |
 | No key supplied | `400 Bad Request` with a JSON body |
+| Nested idempotent call inside the action is locked | `409` + `Retry-After` under the request's **own** `Idempotency-Key`, message "An operation this request depends on is already being processed." |
+| Nested idempotent call throws `OutcomeUnknownException` | Rethrown (`500` by default), not a duplicate answer; a lease outer key caches a final one, releases a non-final one (`failures-and-gc.md`) |
 | Action responded `5xx` | Lease: **not cached** — key released, a retry re-runs (the `cacheable` predicate of `HttpOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the inbox (and AtMostOnce with `cacheResult`) stores and replays the `5xx`; without `cacheResult` an AtMostOnce duplicate gets the `409` above |
 
 ## Queue / jobs
@@ -122,6 +124,8 @@ configured instance in a bootloader.
 | First delivery | Handler runs; the guarantee records the effect |
 | Redelivery after completion | Deduplicated — the handler does **not** re-run; the job is ACKed |
 | Another worker holds the key | `LockedException` → `RetryableLockException` → re-enqueued after the lock TTL (not dead-lettered) |
+| Nested idempotent call inside the handler is locked | Re-enqueued the same way |
+| Nested idempotent call throws `OutcomeUnknownException` | Rethrown, not ACKed — the job fails; the default `Release` frees a lease key either way |
 | No key resolvable | `MissingKeyException` — **not** retryable, the job dead-letters instead of retrying forever |
 | `AtMostOnce` duplicate | Handler does **not** re-run, job ACKed (fire-once) — the natural home for AtMostOnce. `QueueRetryMiddleware` turns `OutcomeUnknownException` into a `null` result so it never reaches the retry policy; keep it in the stack |
 
@@ -141,6 +145,8 @@ Key from the `idempotency-key` metadata entry (case-insensitive; configurable vi
 | Retry after completion | Cached message rebuilt, `idempotency-replay: true`; the method does **not** run |
 | Concurrent retry | `ABORTED` + `google.rpc.RetryInfo` detail with the suggested delay |
 | No key in metadata | `INVALID_ARGUMENT` |
+| Nested idempotent call inside the method is locked | `ABORTED` + `RetryInfo`, message "An operation this request depends on is already being processed (retry after Ns)." |
+| Nested idempotent call throws `OutcomeUnknownException` | Rethrown — a worker error, not a status; a lease outer key caches a final one, releases a non-final one |
 | Method threw a `GRPCException` | The status (code + message + details) is snapshotted and replayed, exact subclass included |
 | ...with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Lease: not cached — key released, a retry re-runs (predicate of `GrpcOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the inbox (and AtMostOnce with `cacheResult`) stores and replays the status; without `cacheResult` an AtMostOnce duplicate gets the `ABORTED` above |
 | AtMostOnce duplicate with no stored outcome (as for HTTP) | `ABORTED` **without** the `RetryInfo` detail, `idempotency-replay: true`; the method does **not** run |

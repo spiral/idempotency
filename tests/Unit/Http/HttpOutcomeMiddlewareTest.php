@@ -105,6 +105,7 @@ final class HttpOutcomeMiddlewareTest
         Assert::same($response->getStatusCode(), 409);
         Assert::same($response->getHeaderLine('Retry-After'), '7');
         Assert::same($response->getHeaderLine('Idempotency-Key'), 'outer');
+        Assert::string((string) $response->getBody())->contains('depends on');
     }
 
     public function lockedIsAConflictWithRetryAfter(): void

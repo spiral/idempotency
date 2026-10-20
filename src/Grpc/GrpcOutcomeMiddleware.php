@@ -141,8 +141,8 @@ final readonly class GrpcOutcomeMiddleware implements ResolutionMiddleware
         try {
             $cached = $next($encoded);
         } catch (LockedException $e) {
-            // Not guarded like an unknown outcome: a nested lock released this call's own key (the classifier
-            // calls it Infrastructure), so "ABORTED, retry after N" holds for this call too.
+            // Unguarded: after a nested lock a lease key is free and an inbox one rolled back, so "retry
+            // after N" holds; an AtMostOnce key is consumed, and its retry gets the unknown-outcome ABORTED.
             throw new GRPCException(
                 \sprintf(
                     $executed
