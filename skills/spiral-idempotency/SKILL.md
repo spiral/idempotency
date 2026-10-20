@@ -76,7 +76,8 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
   `409` without `Retry-After`, gRPC `ABORTED` without `RetryInfo`, queue ACK (needs
   `QueueRetryMiddleware` in the stack), event listener skipped; a direct `execute()` throws it.
   Without `cacheResult` no outcome ever appears; with it the first run may still be running, and a
-  later retry may replay its result.
+  later retry may replay its result. Upgrading: a Cycle row an earlier release wrote for a
+  null-returning first run (`cacheResult` on) holds a NULL `result` and now answers as unknown.
 - A failing **queue** job releases its key by default (`FailurePolicy::Release`), an HTTP/gRPC failure
   is cached; set `failurePolicy:` on `#[Idempotent]` when the operation needs the other one.
 - Setting `retentionTtl` on inbox/at-most-once narrows the dedup window — swept records mean a

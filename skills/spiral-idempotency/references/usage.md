@@ -90,7 +90,7 @@ curl -X POST /payments/charge -H 'Idempotency-Key: pay-42' -d 'amount=500'
 | First call | Runs; whole response snapshotted. `Idempotency-Key` + `Idempotency-Replay: false` headers |
 | Retry after completion | Cached response replayed byte-identically, `Idempotency-Replay: true`; the action does **not** run |
 | Concurrent retry (first call in flight) | `409 Conflict` + `Retry-After` (lease storages) |
-| AtMostOnce duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `409 Conflict` **without** `Retry-After` (never an outcome without `cacheResult`; with it a later retry may replay one), `Idempotency-Replay: true`, JSON `"error": "outcome_unknown"`; the action does **not** run |
+| AtMostOnce duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `409 Conflict` **without** `Retry-After` (with `cacheResult` off no outcome is ever stored; with it on, a later retry may replay one), `Idempotency-Replay: true`, JSON `"error": "outcome_unknown"`; the action does **not** run |
 | No key supplied | `400 Bad Request` with a JSON body |
 | Action responded `5xx` | Lease: **not cached** — key released, a retry re-runs (the `cacheable` predicate of `HttpOutcomeMiddleware`). Inbox / AtMostOnce never re-run: the inbox (and AtMostOnce with `cacheResult`) stores and replays the `5xx`; without `cacheResult` an AtMostOnce duplicate gets the `409` above |
 
@@ -189,9 +189,9 @@ preserves, not one regenerated per dispatch.
 |---|---|
 | First dispatch | Every marked listener runs under its own key (scope = `ListenerClass::method`) |
 | Re-dispatch | Completed marked listeners are skipped; unmarked ones run again |
-| One listener threw | The dispatcher stops at it; the re-dispatch skips the completed ones and re-runs only the failed one (`FailurePolicy::Release` is the events default) |
+| One listener threw | The dispatcher stops at it; on a lease or inbox storage the re-dispatch skips the completed ones and re-runs only the failed one (`FailurePolicy::Release` is the events default). An AtMostOnce listener is never re-run |
 | Concurrent dispatch | `LockedException` propagates untouched — the durable producer owns the retry |
-| AtMostOnce duplicate with no stored outcome | The listener is skipped silently; the fan-out goes on |
+| AtMostOnce duplicate with no stored outcome | The listener is skipped silently — its key is consumed whether the first run completed, failed or is still running; the fan-out goes on |
 | No `key` path and no `HasIdempotencyKey` | `MissingKeyException` |
 
 The identity must be the one the producer preserves across re-publications of the same logical event

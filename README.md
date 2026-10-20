@@ -56,6 +56,11 @@ it crashed or threw: the marker and the result are not committed atomically) —
 retry may replay one. Each transport maps that signal: HTTP `409 Conflict` without `Retry-After`, gRPC
 `ABORTED` without a retry hint, a queue job is ACKed, an event listener is skipped.
 
+> [!NOTE]
+> Upgrading: a Cycle at-most-once row written by an earlier release for a first run that returned `null` with
+> `cacheResult` on holds a NULL `result`, so its duplicate now answers as an unknown outcome instead of
+> replaying `null`.
+
 ### Quick start
 
 Register the bootloaders:
@@ -196,7 +201,7 @@ curl -X POST /payments/charge -H 'Idempotency-Key: pay-42' -d 'amount=500'
 | First call | The action runs; the whole response is snapshotted. Headers: `Idempotency-Key`, `Idempotency-Replay: false` |
 | Retry after completion | The cached response is replayed byte-identically, `Idempotency-Replay: true`; the action does **not** run |
 | Retry while the first call is still in flight | `409 Conflict` + `Retry-After` (lease storages) |
-| `AtMostOnce` duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `409 Conflict` **without** `Retry-After` — nothing tells when, or whether, an outcome gets stored: never without `cacheResult`, a later retry may replay one with it — with `Idempotency-Key`, `Idempotency-Replay: true` and a JSON body (`"error": "outcome_unknown"`); the action does **not** run |
+| `AtMostOnce` duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `409 Conflict` **without** `Retry-After` — with `cacheResult` off no outcome is ever stored; with it on, a later retry may replay one — with `Idempotency-Key`, `Idempotency-Replay: true` and a JSON body (`"error": "outcome_unknown"`); the action does **not** run |
 | No key supplied | `400 Bad Request` with a JSON body |
 | The action responded `5xx` | Lease: not cached — the key is released and a retry re-runs the operation (configurable predicate of `HttpOutcomeMiddleware`). Inbox and `AtMostOnce` never re-run: the inbox (and `AtMostOnce` with `cacheResult`) stores the `5xx` and replays it; without `cacheResult` an `AtMostOnce` duplicate gets the `409` above |
 
@@ -330,7 +335,7 @@ The client sends the key as metadata; the server-side key middleware reads `idem
 | No key in the metadata | `INVALID_ARGUMENT` (the analog of HTTP `400`) |
 | The method threw a `GRPCException` | The **status** is snapshotted (code + message + details) and replayed identically, exact subclass included |
 | ... with a transient status (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL`, ...) | Lease: not cached — the key is released and a retry re-runs (configurable predicate of `GrpcOutcomeMiddleware`). Inbox and `AtMostOnce` never re-run: the inbox (and `AtMostOnce` with `cacheResult`) stores the status and replays it; without `cacheResult` an `AtMostOnce` duplicate gets the `ABORTED` above |
-| `AtMostOnce` duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `ABORTED` **without** the `RetryInfo` detail — nothing tells when, or whether, an outcome gets stored: never without `cacheResult`, a later retry may replay one with it — with `idempotency-replay: true`; the method does **not** run |
+| `AtMostOnce` duplicate with no stored outcome (`cacheResult` off; or on, and the first call is still running, crashed or threw before storing one) | `ABORTED` **without** the `RetryInfo` detail — with `cacheResult` off no outcome is ever stored; with it on, a later retry may replay one — with `idempotency-replay: true`; the method does **not** run |
 | A `null` outcome (void operation, first call or replay) | The method's **declared response type** is returned empty — gRPC has no "empty ACK", and the bridge's invoker requires a `Message` |
 
 Unlike HTTP, no configuration is needed to keep a **failure** replay faithful: over gRPC a negative
@@ -416,9 +421,9 @@ The key can also come from the attribute's `key` arg-path, resolved over the sin
 |---|---|
 | First dispatch | Every marked listener runs, each under its own key (scope = `ListenerClass::method`) |
 | Re-dispatch of the same event | Each marked listener that completed is skipped; an unmarked one runs again |
-| One listener of the fan-out threw | The dispatcher stops at it (PSR-14 semantics); the re-dispatch skips the listeners that completed and re-runs only the failed one |
+| One listener of the fan-out threw | The dispatcher stops at it (PSR-14 semantics); on a lease or inbox storage the re-dispatch skips the listeners that completed and re-runs only the failed one. An `AtMostOnce` listener is never re-run — its key was consumed before it threw |
 | Concurrent dispatch of the same event | `LockedException` propagates untouched — the durable producer that dispatched the event owns the retry |
-| `AtMostOnce` duplicate with no stored outcome | The listener is skipped silently, like a completed one; the fan-out goes on |
+| `AtMostOnce` duplicate with no stored outcome | The listener is skipped silently — its key is consumed whether the first run completed, failed or is still running; the fan-out goes on |
 | Event with neither `key` path nor `HasIdempotencyKey` | `MissingKeyException` |
 
 A failing listener **releases** its key (`FailurePolicy::Release` is the events default), which is what

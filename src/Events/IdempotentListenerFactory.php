@@ -49,7 +49,8 @@ use Spiral\Idempotency\KeyResolver;
  * stops the fan-out at the first exception, so the surrounding redelivery — the durable producer that
  * dispatched the event — is what retries a concurrent duplicate. An
  * {@see OutcomeUnknownException} (an AtMostOnce duplicate with nothing to replay) skips the listener
- * silently, like any other completed one: a listener returns nothing, so there is no outcome to miss.
+ * silently: its key is consumed whether the first run completed, failed or is still running, and a
+ * listener returns nothing, so there is no outcome to miss.
  *
  * @api
  */
