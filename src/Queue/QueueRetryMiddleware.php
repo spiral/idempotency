@@ -52,8 +52,9 @@ final readonly class QueueRetryMiddleware implements ResolutionMiddleware
         try {
             return $next($tracked);
         } catch (LockedException $e) {
-            // Someone else holds PROCESSING for this key. Re-enqueue after the lock is expected to clear,
-            // rather than failing the job. The native RetryPolicyInterceptor (registered OUTSIDE this
+            // Someone else holds PROCESSING for this key — or for a nested call's key, which released this
+            // job's own (the classifier calls it Infrastructure), so it is not guarded like an unknown
+            // outcome. Either way, re-enqueue after the lock is expected to clear rather than failing the job. The native RetryPolicyInterceptor (registered OUTSIDE this
             // interceptor) catches this and re-queues with the carried delay.
             throw new RetryableLockException($e->lock->retryAfter, $this->maxLockRetries, $e);
         } catch (OutcomeUnknownException $e) {

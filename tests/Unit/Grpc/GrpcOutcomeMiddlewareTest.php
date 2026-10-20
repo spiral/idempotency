@@ -322,6 +322,29 @@ final class GrpcOutcomeMiddlewareTest
         Assert::null($headers->get('idempotency-replay'));
     }
 
+    public function nestedLockedIsStillAbortedWithRetryInfo(): void
+    {
+        // A nested lock released this call's own key: "ABORTED, retry after N" holds for it too.
+        $middleware = new GrpcOutcomeMiddleware();
+        $locked = new LockedException(new Locked('inner', 7, new \DateTimeImmutable()));
+        $call = $this->call(static fn(): never => throw $locked);
+
+        $thrown = null;
+        try {
+            $middleware->process(
+                $call,
+                static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+            );
+        } catch (GRPCException $e) {
+            $thrown = $e;
+        }
+
+        Assert::notNull($thrown);
+        Assert::same($thrown->getCode(), StatusCode::ABORTED);
+        Assert::same($thrown->getPrevious(), $locked);
+        Assert::true(($thrown->getDetails()[0] ?? null) instanceof RetryInfo);
+    }
+
     public function mapsMissingKeyToInvalidArgument(): void
     {
         $middleware = new GrpcOutcomeMiddleware();

@@ -100,8 +100,10 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
     public function process(IdempotencyCall $call, callable $next): mixed
     {
         $executed = false;
-        $encoded = $call->withOperation(function (IdempotencyContext $ctx) use (&$executed, $call): mixed {
+        $ownKey = null;
+        $encoded = $call->withOperation(function (IdempotencyContext $ctx) use (&$executed, &$ownKey, $call): mixed {
             $executed = true;
+            $ownKey = $ctx->getKey();
 
             try {
                 $result = ($call->operation)($ctx);
@@ -116,7 +118,9 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
         try {
             $cached = $next($encoded);
         } catch (LockedException $e) {
-            return $this->conflict($e->lock);
+            // Not guarded like an unknown outcome: a nested lock released this request's own key (the
+            // classifier calls it Infrastructure), so "409, retry after N" holds for this request too.
+            return $this->conflict($e->lock, $ownKey);
         } catch (OutcomeUnknownException $e) {
             // Thrown after the operation ran, it came from a nested idempotent call inside the action —
             // that call's failure, not a duplicate of this request.
@@ -229,17 +233,23 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
             ->withBody($this->streams->createStream($payload));
     }
 
-    private function conflict(Locked $lock): ResponseInterface
+    /**
+     * @param non-empty-string|null $ownKey this request's key when the lock is held on a nested idempotent
+     *        call's key — announced instead of the inner one; null when this request's own key is locked
+     */
+    private function conflict(Locked $lock, ?string $ownKey = null): ResponseInterface
     {
         $payload = (string) \json_encode([
             'error' => 'conflict',
-            'message' => 'Request with this idempotency key is already being processed.',
+            'message' => $ownKey === null
+                ? 'Request with this idempotency key is already being processed.'
+                : 'An operation this request depends on is already being processed.',
             'retry_after' => $lock->retryAfter,
         ]);
 
         return $this->responses->createResponse(409)
             ->withHeader('Content-Type', 'application/json')
-            ->withHeader('Idempotency-Key', $lock->key)
+            ->withHeader('Idempotency-Key', $ownKey ?? $lock->key)
             ->withHeader('Retry-After', (string) $lock->retryAfter)
             ->withBody($this->streams->createStream($payload));
     }

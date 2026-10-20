@@ -85,6 +85,28 @@ final class HttpOutcomeMiddlewareTest
         }
     }
 
+    public function nestedLockedIsAConflictUnderTheOwnKey(): void
+    {
+        // A nested lock released this request's own key: "409, retry after N" holds for it too, but the
+        // inner key must not leak into this request's headers.
+        $locked = new LockedException(new Locked('inner', 7, new \DateTimeImmutable()));
+        $call = new IdempotencyCall(
+            context: new \stdClass(),
+            operation: static fn(): never => throw $locked,
+            options: new ExecuteOptions(),
+        );
+
+        $response = $this->middleware()->process(
+            $call,
+            static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext('outer')),
+        );
+        \assert($response instanceof ResponseInterface);
+
+        Assert::same($response->getStatusCode(), 409);
+        Assert::same($response->getHeaderLine('Retry-After'), '7');
+        Assert::same($response->getHeaderLine('Idempotency-Key'), 'outer');
+    }
+
     public function lockedIsAConflictWithRetryAfter(): void
     {
         $response = $this->answer(new LockedException(new Locked('k', 7, new \DateTimeImmutable())));

@@ -141,9 +141,13 @@ final readonly class GrpcOutcomeMiddleware implements ResolutionMiddleware
         try {
             $cached = $next($encoded);
         } catch (LockedException $e) {
+            // Not guarded like an unknown outcome: a nested lock released this call's own key (the classifier
+            // calls it Infrastructure), so "ABORTED, retry after N" holds for this call too.
             throw new GRPCException(
                 \sprintf(
-                    'Request with this idempotency key is already being processed (retry after %ds).',
+                    $executed
+                        ? 'An operation this request depends on is already being processed (retry after %ds).'
+                        : 'Request with this idempotency key is already being processed (retry after %ds).',
                     $e->lock->retryAfter,
                 ),
                 StatusCode::ABORTED,

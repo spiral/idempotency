@@ -72,12 +72,38 @@ final class QueueRetryMiddlewareTest
             options: new ExecuteOptions(),
         );
 
-        Expect::exception(OutcomeUnknownException::class);
+        try {
+            $middleware->process(
+                $call,
+                static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+            );
+            Assert::fail('a nested call\'s OutcomeUnknownException must not ACK the job');
+        } catch (OutcomeUnknownException $e) {
+            Assert::same($e, $nested);
+            Assert::same($e->key, 'inner');
+        }
+    }
 
-        $middleware->process(
-            $call,
-            static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+    public function nestedLockedStillReEnqueuesTheJob(): void
+    {
+        // A nested lock released this job's own key, so waiting for the inner lock and re-running is right.
+        $middleware = new QueueRetryMiddleware();
+        $locked = new LockedException(new Locked('inner', 7, new \DateTimeImmutable()));
+        $call = new IdempotencyCall(
+            context: new \stdClass(),
+            operation: static fn(): never => throw $locked,
+            options: new ExecuteOptions(),
         );
+
+        try {
+            $middleware->process(
+                $call,
+                static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+            );
+            Assert::fail('a nested LockedException must still re-enqueue the job');
+        } catch (RetryableLockException $e) {
+            Assert::same($e->getPrevious(), $locked);
+        }
     }
 
     public function mapsLockedExceptionToRetryable(): void
