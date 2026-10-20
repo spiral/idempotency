@@ -280,7 +280,7 @@ final class GrpcOutcomeMiddlewareTest
         $headers = new ResponseHeaders();
         $middleware = new GrpcOutcomeMiddleware();
         $call = $this->serviceCall(static fn(): mixed => new FakeGrpcMessage('pong'), $this->grpcContext($headers));
-        $unknown = new OutcomeUnknownException('k');
+        $unknown = new OutcomeUnknownException('k', final: true);
 
         $thrown = null;
         try {
@@ -306,7 +306,7 @@ final class GrpcOutcomeMiddlewareTest
         // Raised inside the method by a nested idempotent call: the method ran, this call is no duplicate.
         $headers = new ResponseHeaders();
         $middleware = new GrpcOutcomeMiddleware();
-        $nested = new OutcomeUnknownException('inner');
+        $nested = new OutcomeUnknownException('inner', final: true);
         $call = $this->serviceCall(static fn(): never => throw $nested, $this->grpcContext($headers));
 
         try {

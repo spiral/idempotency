@@ -32,13 +32,26 @@ final class DefaultFailureClassifierTest
         Assert::same((new DefaultFailureClassifier())->classify($e), FailureKind::Infrastructure);
     }
 
-    public function nestedIdempotencySignalsAreInfrastructure(): void
+    public function nestedLockIsInfrastructure(): void
     {
-        $classifier = new DefaultFailureClassifier();
         $locked = new LockedException(new Locked('inner', 5, new \DateTimeImmutable()));
 
-        Assert::same($classifier->classify($locked), FailureKind::Infrastructure);
-        Assert::same($classifier->classify(new OutcomeUnknownException('inner')), FailureKind::Infrastructure);
+        Assert::same((new DefaultFailureClassifier())->classify($locked), FailureKind::Infrastructure);
+    }
+
+    public function finalUnknownOutcomeIsDomain(): void
+    {
+        // The inner key answers the same on every call: re-running would only repeat the outer effects.
+        $unknown = new OutcomeUnknownException('inner', final: true);
+
+        Assert::same((new DefaultFailureClassifier())->classify($unknown), FailureKind::Domain);
+    }
+
+    public function pendingUnknownOutcomeIsInfrastructure(): void
+    {
+        $unknown = new OutcomeUnknownException('inner', final: false);
+
+        Assert::same((new DefaultFailureClassifier())->classify($unknown), FailureKind::Infrastructure);
     }
 
     public function queueContractIsAvailableInTheTestEnvironment(): void

@@ -280,9 +280,39 @@ final class LeaseIdempotencyTest
         Assert::same($calls, 2);
     }
 
-    public function nestedOutcomeUnknownIsNotCachedAsTheOuterOutcome(): void
+    public function nestedPendingOutcomeUnknownIsNotCachedAsTheOuterOutcome(): void
     {
-        $this->assertNestedSignalFreesTheOuterKey(new OutcomeUnknownException('inner'));
+        $this->assertNestedSignalFreesTheOuterKey(new OutcomeUnknownException('inner', final: false));
+    }
+
+    public function nestedFinalOutcomeUnknownSettlesTheOuterKey(): void
+    {
+        // The inner key will answer the same forever: re-running the outer operation would only repeat
+        // its other effects, so the outer key caches the failure and the retry replays it.
+        $driver = $this->driver();
+        $options = new ExecuteOptions(failurePolicy: FailurePolicy::Cache);
+        $nested = new OutcomeUnknownException('inner', final: true);
+        $calls = 0;
+        $op = static function () use (&$calls, $nested): never {
+            ++$calls;
+            throw $nested;
+        };
+
+        try {
+            $driver->execute('outer', $op, $options);
+            Assert::fail('the nested signal must propagate on the first run');
+        } catch (OutcomeUnknownException $e) {
+            Assert::same($e, $nested);
+        }
+
+        try {
+            $driver->execute('outer', $op, $options);
+            Assert::fail('the cached failure must be replayed');
+        } catch (CachedDomainFailureException $e) {
+            Assert::same($e->originalClass, OutcomeUnknownException::class);
+        }
+
+        Assert::same($calls, 1);
     }
 
     public function nestedLockedIsNotCachedAsTheOuterOutcome(): void

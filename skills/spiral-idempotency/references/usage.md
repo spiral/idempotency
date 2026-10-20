@@ -245,7 +245,7 @@ service and supports `parentKey` hierarchies for multi-step chains).
 
 A replayed `null` is a stored outcome. An AtMostOnce storage with no stored outcome (`cacheResult`
 off; or on, and the first run is still running, crashed or threw before storing one) throws
-`Exception\OutcomeUnknownException` (with `->key`) instead of returning `null` — catch it where
+`Exception\OutcomeUnknownException` (with `->key`, and `->final` — true when no outcome can ever appear) instead of returning `null` — catch it where
 "already consumed, answer unknown" needs handling. Without `cacheResult` no outcome is ever stored;
 with it, a later retry may replay one. A lease
 storage throws `LockedException` while another call holds the key.

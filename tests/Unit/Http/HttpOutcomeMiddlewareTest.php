@@ -49,7 +49,7 @@ final class HttpOutcomeMiddlewareTest
 
     public function outcomeUnknownIsAConflictWithoutRetryAfter(): void
     {
-        $response = $this->answer(new OutcomeUnknownException('k'));
+        $response = $this->answer(new OutcomeUnknownException('k', final: true));
 
         Assert::same($response->getStatusCode(), 409);
         // Unlike a lock, nothing tells when, or whether, an outcome gets stored.
@@ -67,7 +67,7 @@ final class HttpOutcomeMiddlewareTest
     public function outcomeUnknownOfANestedCallPropagates(): void
     {
         // Raised inside the action by a nested idempotent call: the action ran, this request is no duplicate.
-        $nested = new OutcomeUnknownException('inner');
+        $nested = new OutcomeUnknownException('inner', final: true);
         $call = new IdempotencyCall(
             context: new \stdClass(),
             operation: static fn(): never => throw $nested,

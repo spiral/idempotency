@@ -500,7 +500,8 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
         } catch (\RuntimeException) {
         }
 
-        $this->assertOutcomeUnknown($driver, $key, $op);
+        // Not final: from the row alone the failed first run is indistinguishable from one still running.
+        $this->assertOutcomeUnknown($driver, $key, $op, final: false);
         Assert::same($calls, 1);
     }
 
@@ -750,18 +751,21 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
 
     /**
      * @param non-empty-string $key
+     * @param bool $final expected: true without the result cache, false when one may still be stored
      */
     private function assertOutcomeUnknown(
         CycleAtMostOnceDriver $driver,
         string $key,
         \Closure $operation,
         ?ExecuteOptions $options = null,
+        bool $final = true,
     ): void {
         try {
             $driver->execute($key, $operation, $options);
             Assert::fail('a duplicate without a stored outcome must throw OutcomeUnknownException');
         } catch (OutcomeUnknownException $e) {
             Assert::same($e->key, $key);
+            Assert::same($e->final, $final);
         }
     }
 

@@ -55,7 +55,7 @@ final class QueueRetryMiddlewareTest
         $middleware = new QueueRetryMiddleware();
 
         $result = $middleware->process($this->call(), static function (IdempotencyCall $call): never {
-            throw new OutcomeUnknownException('k');
+            throw new OutcomeUnknownException('k', final: true);
         });
 
         Assert::null($result);
@@ -65,7 +65,7 @@ final class QueueRetryMiddlewareTest
     {
         // Raised inside the handler by a nested idempotent call: the handler ran, this job is no duplicate.
         $middleware = new QueueRetryMiddleware();
-        $nested = new OutcomeUnknownException('inner');
+        $nested = new OutcomeUnknownException('inner', final: true);
         $call = new IdempotencyCall(
             context: new \stdClass(),
             operation: static fn(): never => throw $nested,

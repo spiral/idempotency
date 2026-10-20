@@ -87,7 +87,7 @@ final class OutcomeUnknownDriverStub implements Idempotency
 {
     public function execute(string $key, \Closure $operation, ?ExecuteOptions $options = null): mixed
     {
-        throw new OutcomeUnknownException($key);
+        throw new OutcomeUnknownException($key, final: true);
     }
 }
 

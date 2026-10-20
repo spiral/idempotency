@@ -211,7 +211,7 @@ final class ConsumedIdempotency implements Idempotency
             $operation(new StubIdempotencyContext($key));
         }
 
-        throw new OutcomeUnknownException($this->nestedKey ?? $key);
+        throw new OutcomeUnknownException($this->nestedKey ?? $key, final: true);
     }
 }
 

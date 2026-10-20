@@ -531,7 +531,7 @@ public function handle(string $transactionId): Receipt
 ```
 
 A replayed `null` is a stored outcome. An `AtMostOnce` storage with no stored outcome throws
-`Exception\OutcomeUnknownException` (carrying the `key`) instead of returning `null`; catch it where
+`Exception\OutcomeUnknownException` (carrying the `key`, and `final` — true when no outcome can ever appear) instead of returning `null`; catch it where
 "already consumed, answer unknown" needs handling. Without `cacheResult` that holds for good; with it,
 the first run may still be running, and a later retry may replay its result. A lease storage still throws `LockedException` while
 another call holds the key.
@@ -547,14 +547,17 @@ and "will a retry help" are independent axes:
 
 | Kind               | Default mapping                                                                   | Lease reaction                                        |
 |--------------------|-----------------------------------------------------------------------------------|-------------------------------------------------------|
-| **Domain**         | any other `\Exception`, or a `RetryableExceptionInterface` that is **not** retryable | Cached as a valid negative outcome, replayed on retry |
-| **Infrastructure** | `\Error`, `\Exception` implementing `Retryable`, a retryable `RetryableExceptionInterface`, or a `LockedException` / `OutcomeUnknownException` | The key is released; the transport/client retries     |
+| **Domain**         | any other `\Exception`, a `RetryableExceptionInterface` that is **not** retryable, or a **final** `OutcomeUnknownException` | Cached as a valid negative outcome, replayed on retry |
+| **Infrastructure** | `\Error`, `\Exception` implementing `Retryable`, a retryable `RetryableExceptionInterface`, a `LockedException`, or a non-final `OutcomeUnknownException` | The key is released; the transport/client retries     |
 | **Bug**            | Only by explicit configuration (`DefaultFailureClassifier(bugExceptions: [...])`) | The key is released; no re-enqueue — report and fix   |
 
 A `LockedException` or `OutcomeUnknownException` reaching the classifier comes from a **nested**
-idempotent call inside the operation: it describes the inner key's state, not this operation's
-outcome. Caching it under the outer key would replay a transient contention — or an outcome the inner
-storage may still store — for the whole retention TTL, so the outer key is released and a retry re-runs.
+idempotent call inside the operation and describes the inner key's state. A lock is transient
+contention: caching it would replay it for the whole retention TTL after the inner lock is gone, so the
+outer key is released and a retry re-runs. An unknown outcome depends on `$final`, set by the inner
+storage: `true` (AtMostOnce with `cacheResult` off) means the inner key answers the same on every call,
+so re-running the outer operation would only repeat its other effects — it is cached as Domain;
+`false` (`cacheResult` on, the inner result may still be stored) releases the outer key like a lock.
 
 `RetryableExceptionInterface` is `spiral/queue`'s own retry contract: a job exception that already
 states its retry intent for the broker is read the same way here, so it needs no second marker. The

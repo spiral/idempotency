@@ -15,9 +15,12 @@ use Spiral\Queue\Exception\RetryableExceptionInterface;
  * Default, replaceable classifier:
  *
  *   RetryableExceptionInterface        → Infrastructure when `isRetryable()`, Domain otherwise
- *   LockedException, OutcomeUnknownException
- *                                      → Infrastructure (a nested idempotent call's state, not this
- *                                        operation's outcome: caching it would outlive the inner key)
+ *   LockedException                    → Infrastructure (a nested call's transient contention: caching it
+ *                                        would outlive the inner lock)
+ *   OutcomeUnknownException            → Domain when `$final` (the inner key answers the same on every
+ *                                        call, so re-running this operation would only repeat its other
+ *                                        effects), Infrastructure otherwise (the inner outcome may still
+ *                                        be stored)
  *   \Error (and subclasses)            → Infrastructure (retry: a redeploy between attempts may fix it)
  *   \Exception + Retryable    → Infrastructure
  *   \Exception (everything else)       → Domain      ⚠ caches un-tagged infra for the retention TTL
@@ -61,7 +64,11 @@ final class DefaultFailureClassifier implements FailureClassifier
             return $e->isRetryable() ? FailureKind::Infrastructure : FailureKind::Domain;
         }
 
-        if ($e instanceof LockedException || $e instanceof OutcomeUnknownException || $e instanceof \Error) {
+        if ($e instanceof OutcomeUnknownException) {
+            return $e->final ? FailureKind::Domain : FailureKind::Infrastructure;
+        }
+
+        if ($e instanceof LockedException || $e instanceof \Error) {
             return FailureKind::Infrastructure;
         }
 

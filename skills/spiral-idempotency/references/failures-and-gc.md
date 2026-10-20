@@ -8,13 +8,15 @@ customize the mapping.
 
 | Kind | Default mapping | Lease reaction |
 |---|---|---|
-| **Domain** | any other `\Exception`, or a `RetryableExceptionInterface` that is **not** retryable | Cached as a valid negative outcome, replayed on retry |
-| **Infrastructure** | `\Error`, `\Exception` implementing `Retryable`, a retryable `RetryableExceptionInterface`, or a `LockedException` / `OutcomeUnknownException` | Key released; the transport/client retries |
+| **Domain** | any other `\Exception`, a `RetryableExceptionInterface` that is **not** retryable, or a **final** `OutcomeUnknownException` | Cached as a valid negative outcome, replayed on retry |
+| **Infrastructure** | `\Error`, `\Exception` implementing `Retryable`, a retryable `RetryableExceptionInterface`, a `LockedException`, or a non-final `OutcomeUnknownException` | Key released; the transport/client retries |
 | **Bug** | only via explicit config: `DefaultFailureClassifier(bugExceptions: [...])` | Key released; no re-enqueue — report and fix |
 
 A `LockedException` / `OutcomeUnknownException` thrown by the operation comes from a nested
-idempotent call: it is the inner key's state, not this operation's outcome, so the outer key is
-released rather than caching it for the retention TTL, and a retry re-runs.
+idempotent call. A lock is transient: the outer key is released and a retry re-runs. An unknown
+outcome follows its `$final` flag: `true` (inner AtMostOnce with `cacheResult` off — it answers the
+same forever) is cached as Domain, so the outer operation does not repeat its other effects on every
+retry; `false` (the inner result may still be stored) releases the outer key.
 
 `RetryableExceptionInterface` is `spiral/queue`'s own retry contract: a job exception that already
 states its retry intent for the broker is read the same way here, so it needs no second marker. The

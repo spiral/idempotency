@@ -125,12 +125,13 @@ final readonly class CycleAtMostOnceDriver implements Idempotency, GuaranteeProv
     private function replay(DatabaseInterface $db, string $key): mixed
     {
         if (!$this->cacheResult) {
-            throw new OutcomeUnknownException($key);
+            throw new OutcomeUnknownException($key, final: true);
         }
 
         $row = $db->select('result')->from($this->table)->where('key', $key)->run()->fetch();
         if (!\is_array($row) || $row['result'] === null) {
-            throw new OutcomeUnknownException($key);
+            // Not final: a crashed or failed first run is indistinguishable from one still running.
+            throw new OutcomeUnknownException($key, final: false);
         }
 
         return $this->serializer->unserialize((string) $row['result']);
