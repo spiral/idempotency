@@ -301,6 +301,27 @@ final class GrpcOutcomeMiddlewareTest
         Assert::same($headers->get('idempotency-key'), 'k');
     }
 
+    public function outcomeUnknownOfANestedCallPropagates(): void
+    {
+        // Raised inside the method by a nested idempotent call: the method ran, this call is no duplicate.
+        $headers = new ResponseHeaders();
+        $middleware = new GrpcOutcomeMiddleware();
+        $nested = new OutcomeUnknownException('inner');
+        $call = $this->serviceCall(static fn(): never => throw $nested, $this->grpcContext($headers));
+
+        try {
+            $middleware->process(
+                $call,
+                static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+            );
+            Assert::fail('a nested call\'s OutcomeUnknownException must not become ABORTED');
+        } catch (OutcomeUnknownException $e) {
+            Assert::same($e, $nested);
+        }
+
+        Assert::null($headers->get('idempotency-replay'));
+    }
+
     public function mapsMissingKeyToInvalidArgument(): void
     {
         $middleware = new GrpcOutcomeMiddleware();

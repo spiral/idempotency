@@ -12,6 +12,7 @@ use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Http\HttpOutcomeMiddleware;
 use Spiral\Idempotency\Lease\Locked;
 use Spiral\Idempotency\Pipeline\IdempotencyCall;
+use Spiral\Idempotency\Tests\Unit\Stub\StubIdempotencyContext;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Test;
@@ -61,6 +62,27 @@ final class HttpOutcomeMiddlewareTest
         Assert::true(\is_array($body));
         /** @var array<string, mixed> $body */
         Assert::same($body['error'] ?? null, 'outcome_unknown');
+    }
+
+    public function outcomeUnknownOfANestedCallPropagates(): void
+    {
+        // Raised inside the action by a nested idempotent call: the action ran, this request is no duplicate.
+        $nested = new OutcomeUnknownException('inner');
+        $call = new IdempotencyCall(
+            context: new \stdClass(),
+            operation: static fn(): never => throw $nested,
+            options: new ExecuteOptions(),
+        );
+
+        try {
+            $this->middleware()->process(
+                $call,
+                static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+            );
+            Assert::fail('a nested call\'s OutcomeUnknownException must not become a 409');
+        } catch (OutcomeUnknownException $e) {
+            Assert::same($e, $nested);
+        }
     }
 
     public function lockedIsAConflictWithRetryAfter(): void

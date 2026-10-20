@@ -12,6 +12,7 @@ use Spiral\Idempotency\Lease\Locked;
 use Spiral\Idempotency\Pipeline\IdempotencyCall;
 use Spiral\Idempotency\Queue\QueueRetryMiddleware;
 use Spiral\Idempotency\Queue\RetryableLockException;
+use Spiral\Idempotency\Tests\Unit\Stub\StubIdempotencyContext;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Expect;
@@ -58,6 +59,25 @@ final class QueueRetryMiddlewareTest
         });
 
         Assert::null($result);
+    }
+
+    public function outcomeUnknownOfANestedCallPropagates(): void
+    {
+        // Raised inside the handler by a nested idempotent call: the handler ran, this job is no duplicate.
+        $middleware = new QueueRetryMiddleware();
+        $nested = new OutcomeUnknownException('inner');
+        $call = new IdempotencyCall(
+            context: new \stdClass(),
+            operation: static fn(): never => throw $nested,
+            options: new ExecuteOptions(),
+        );
+
+        Expect::exception(OutcomeUnknownException::class);
+
+        $middleware->process(
+            $call,
+            static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+        );
     }
 
     public function mapsLockedExceptionToRetryable(): void

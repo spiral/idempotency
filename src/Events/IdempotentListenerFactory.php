@@ -92,12 +92,16 @@ final readonly class IdempotentListenerFactory implements ListenerFactoryInterfa
         $idempotency = $registry->resolve($attribute->storage);
 
         return function (object $event) use ($inner, $attribute, $scope, $idempotency): void {
-            $key = $this->key($attribute, $event, $scope);
+            $executed = false;
 
             try {
                 $idempotency->execute(
-                    $key,
-                    fn(IdempotencyContext $context): null => $this->run($inner, $event, $context),
+                    $this->key($attribute, $event, $scope),
+                    function (IdempotencyContext $context) use ($inner, $event, &$executed): null {
+                        $executed = true;
+
+                        return $this->run($inner, $event, $context);
+                    },
                     new ExecuteOptions(
                         $attribute->lockTtl,
                         $attribute->ttl,
@@ -105,9 +109,9 @@ final readonly class IdempotentListenerFactory implements ListenerFactoryInterfa
                     ),
                 );
             } catch (OutcomeUnknownException $e) {
-                // Only this listener's own key: one raised by a nested idempotent call inside the listener
-                // is that call's failure, not a duplicate of this delivery.
-                $e->key === $key or throw $e;
+                // Thrown after the listener ran, it came from a nested idempotent call inside the listener —
+                // that call's failure, not a duplicate of this delivery.
+                $executed and throw $e;
             }
         };
     }

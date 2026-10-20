@@ -6,6 +6,7 @@ namespace Spiral\Idempotency\Queue;
 
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\Exception\OutcomeUnknownException;
+use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\Pipeline\IdempotencyCall;
 use Spiral\Idempotency\Pipeline\ResolutionMiddleware;
 
@@ -41,15 +42,24 @@ final readonly class QueueRetryMiddleware implements ResolutionMiddleware
 
     public function process(IdempotencyCall $call, callable $next): mixed
     {
+        $executed = false;
+        $tracked = $call->withOperation(static function (IdempotencyContext $ctx) use (&$executed, $call): mixed {
+            $executed = true;
+
+            return ($call->operation)($ctx);
+        });
+
         try {
-            return $next($call);
+            return $next($tracked);
         } catch (LockedException $e) {
             // Someone else holds PROCESSING for this key. Re-enqueue after the lock is expected to clear,
             // rather than failing the job. The native RetryPolicyInterceptor (registered OUTSIDE this
             // interceptor) catches this and re-queues with the carried delay.
             throw new RetryableLockException($e->lock->retryAfter, $this->maxLockRetries, $e);
-        } catch (OutcomeUnknownException) {
-            return null;
+        } catch (OutcomeUnknownException $e) {
+            // Thrown after the handler ran, it came from a nested idempotent call inside the handler —
+            // that call's failure, not a duplicate of this job.
+            return $executed ? throw $e : null;
         }
     }
 }

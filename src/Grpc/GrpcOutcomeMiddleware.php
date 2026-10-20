@@ -150,6 +150,10 @@ final readonly class GrpcOutcomeMiddleware implements ResolutionMiddleware
                 previous: $e,
             );
         } catch (OutcomeUnknownException $e) {
+            // Thrown after the operation ran, it came from a nested idempotent call inside the method —
+            // that call's failure, not a duplicate of this request.
+            $executed and throw $e;
+
             $this->mark($call->context, $e->key, replayed: true);
 
             throw new GRPCException(

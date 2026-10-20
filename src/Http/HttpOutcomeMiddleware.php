@@ -117,7 +117,9 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
         } catch (LockedException $e) {
             return $this->conflict($e->lock);
         } catch (OutcomeUnknownException $e) {
-            return $this->outcomeUnknown($e->key);
+            // Thrown after the operation ran, it came from a nested idempotent call inside the action —
+            // that call's failure, not a duplicate of this request.
+            return $executed ? throw $e : $this->outcomeUnknown($e->key);
         } catch (MissingKeyException $e) {
             return $this->badRequest($e->getMessage());
         }
