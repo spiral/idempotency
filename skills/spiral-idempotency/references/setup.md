@@ -113,8 +113,10 @@ Rules for the `transports` section (uncomment/add the entries for the project):
   and registers no transport bootloader omits it; an absent section reads as empty.
 - **Every transport whose bootloader is registered must have an entry** — `[]` is valid (the key
   then comes only from the attribute), but a *missing* one throws `MisconfigurationException` on
-  the first `#[Idempotent]` call. The events transport is the exception: it runs no middleware
-  stack, so it has no entry at all.
+  the first `#[Idempotent]` call. An empty stack also drops the outcome middleware, so `Locked` and
+  an AtMostOnce duplicate propagate unmapped (on the queue: no re-enqueue, no ACK — a plain failure
+  for the retry policy); keep at least the outcome middleware. The events transport is the
+  exception: it runs no middleware stack, so it has no entry at all.
 - **Middleware with constructor options** (a custom header name, `QueueKeyMiddleware`'s
   `fallbackToJobId: true` — see the queue section of `usage.md`) are bound as configured instances in
   a bootloader: the stack lists class names and resolves each through the container.
@@ -127,7 +129,7 @@ Storage config classes (all data-only; the driver is picked by the config class)
 |---|---|---|
 | `Driver\Cycle\CycleLeaseConfig` | AtLeastOnce | `connection` (DBAL db name, null = default), `table` = `'idempotency'`, `lockTtl` = 30, `retentionTtl` = 86400, `heartbeatThreshold` = 0.5 |
 | `Driver\Cycle\CycleInboxConfig` | ExactlyOnce | `connection`, `table` = `'inbox'`, `transactionMode` = `TransactionMode::Exclusive`, `flushMode`, `retentionTtl` = null (keep forever) |
-| `Driver\Cycle\CycleAtMostOnceConfig` | AtMostOnce | `connection`, `table` = `'idempotency_at_most_once'`, `cacheResult` = false (duplicate gets `null`), `retentionTtl` = null |
+| `Driver\Cycle\CycleAtMostOnceConfig` | AtMostOnce | `connection`, `table` = `'idempotency_at_most_once'`, `cacheResult` = false (a duplicate gets `OutcomeUnknownException`; on, the result — `null` included — is stored and replayed best-effort), `retentionTtl` = null |
 | `Driver\Redis\RedisLeaseConfig` | AtLeastOnce | `keyPrefix` = `'idempotency:'`, `lockTtl` = 30, `retentionTtl` = 86400; needs a Redis connection in the container: a `Driver\Redis\RedisCommands` binding (three-command adapter over any Redis client) or `predis/predis` with a `\Predis\ClientInterface` binding; server-side TTL, no GC needed |
 | `Driver\Memory\MemoryLeaseConfig` | AtLeastOnce | `lockTtl` = 30, `retentionTtl` = 86400; a per-process PHP array — no connection, no schema, no GC. Dedup holds only inside the worker that acquired the lease and dies with the process: offer it for tests and local development, never for production traffic spread over several workers |
 

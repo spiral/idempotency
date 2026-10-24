@@ -15,6 +15,7 @@ use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\Exception\MisconfigurationException;
 use Spiral\Idempotency\Exception\MissingKeyException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\Idempotency;
@@ -30,6 +31,7 @@ use Spiral\Idempotency\Lease\Locked;
 use Spiral\Idempotency\Pipeline\Pipeline;
 use Spiral\Idempotency\Tests\Support\MutableClock;
 use Spiral\Idempotency\Tests\Unit\Stub\RecordingIdempotency;
+use Spiral\Idempotency\Tests\Unit\Stub\StubIdempotencyContext;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Expect;
@@ -140,6 +142,18 @@ final class OrderListeners
         $this->record('contended');
     }
 
+    #[Idempotent(storage: 'consumed')]
+    public function consumed(object $event): void
+    {
+        $this->record('consumed');
+    }
+
+    #[Idempotent(storage: 'nested')]
+    public function nested(object $event): void
+    {
+        $this->record('nested');
+    }
+
     #[Idempotent(storage: 'events')]
     public function contextual(object $event, IdempotencyContext $context): void
     {
@@ -182,6 +196,25 @@ final class LockedIdempotency implements Idempotency
     }
 }
 
+/**
+ * An AtMostOnce duplicate with nothing to replay. With a nested key it instead stands for an idempotent
+ * call made INSIDE the listener: the listener runs, and the signal belongs to that inner key.
+ */
+final class ConsumedIdempotency implements Idempotency
+{
+    /** @param non-empty-string|null $nestedKey */
+    public function __construct(private readonly ?string $nestedKey = null) {}
+
+    public function execute(string $key, \Closure $operation, ?ExecuteOptions $options = null): mixed
+    {
+        if ($this->nestedKey !== null) {
+            $operation(new StubIdempotencyContext($key));
+        }
+
+        throw new OutcomeUnknownException($this->nestedKey ?? $key, final: true);
+    }
+}
+
 #[Test]
 #[Covers(IdempotentListenerFactory::class)]
 final class IdempotentListenerFactoryTest
@@ -212,6 +245,8 @@ final class IdempotentListenerFactoryTest
         $this->recorder = new RecordingIdempotency();
         $registry->register('recording', $this->recorder, Guarantee::AtLeastOnce);
         $registry->register('locked', new LockedIdempotency(), Guarantee::AtLeastOnce);
+        $registry->register('consumed', new ConsumedIdempotency(), Guarantee::AtMostOnce);
+        $registry->register('nested', new ConsumedIdempotency('inner-key'), Guarantee::AtMostOnce);
 
         $this->container = new Container();
         $this->container->bindSingleton(IdempotencyRegistry::class, $registry);
@@ -395,6 +430,29 @@ final class IdempotentListenerFactoryTest
         Expect::exception(LockedException::class);
 
         $this->dispatch($fanOut, new OrderPlaced('evt-12'));
+    }
+
+    public function outcomeUnknownSkipsTheListenerAndTheFanOutGoesOn(): void
+    {
+        $listeners = new OrderListeners();
+
+        $this->dispatch($this->fanOut($listeners, 'consumed', 'audit'), new OrderPlaced('evt-13'));
+
+        Assert::same($listeners->runs, ['audit']);
+    }
+
+    public function outcomeUnknownOfANestedKeyPropagates(): void
+    {
+        $listeners = new OrderListeners();
+
+        try {
+            $this->dispatch($this->fanOut($listeners, 'nested'), new OrderPlaced('evt-14'));
+            Assert::fail('The signal of a nested call is not a duplicate of this delivery.');
+        } catch (OutcomeUnknownException $e) {
+            Assert::same($e->key, 'inner-key');
+        }
+
+        Assert::same($listeners->runs, ['nested']);
     }
 
     public function listenerCanInjectTheIdempotencyContext(): void

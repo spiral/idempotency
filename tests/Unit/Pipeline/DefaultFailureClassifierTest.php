@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Spiral\Idempotency\Tests\Unit\Pipeline;
 
+use Spiral\Idempotency\Exception\LockedException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\Internal\Pipeline\DefaultFailureClassifier;
+use Spiral\Idempotency\Lease\Locked;
 use Spiral\Idempotency\Pipeline\FailureKind;
 use Spiral\Idempotency\Pipeline\Retryable;
 use Spiral\Queue\Exception\RetryableExceptionInterface;
@@ -27,6 +30,27 @@ final class DefaultFailureClassifierTest
         $e = new class ('x') extends \Exception implements Retryable {};
 
         Assert::same((new DefaultFailureClassifier())->classify($e), FailureKind::Infrastructure);
+    }
+
+    public function nestedLockIsInfrastructure(): void
+    {
+        $locked = new LockedException(new Locked('inner', 5, new \DateTimeImmutable()));
+
+        Assert::same((new DefaultFailureClassifier())->classify($locked), FailureKind::Infrastructure);
+    }
+
+    public function finalUnknownOutcomeIsDomain(): void
+    {
+        $unknown = new OutcomeUnknownException('inner', final: true);
+
+        Assert::same((new DefaultFailureClassifier())->classify($unknown), FailureKind::Domain);
+    }
+
+    public function pendingUnknownOutcomeIsInfrastructure(): void
+    {
+        $unknown = new OutcomeUnknownException('inner', final: false);
+
+        Assert::same((new DefaultFailureClassifier())->classify($unknown), FailureKind::Infrastructure);
     }
 
     public function queueContractIsAvailableInTheTestEnvironment(): void

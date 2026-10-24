@@ -8,6 +8,7 @@ use Google\Rpc\RetryInfo;
 use Spiral\Idempotency\Exception\CachedDomainFailureException;
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\Exception\MissingKeyException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Grpc\DomainFailureMapper;
 use Spiral\Idempotency\Grpc\GrpcOutcomeMiddleware;
@@ -274,6 +275,74 @@ final class GrpcOutcomeMiddlewareTest
         Assert::same((int) $delay->getSeconds(), 7);
     }
 
+    public function mapsOutcomeUnknownToAbortedWithoutRetryHint(): void
+    {
+        $headers = new ResponseHeaders();
+        $middleware = new GrpcOutcomeMiddleware();
+        $call = $this->serviceCall(static fn(): mixed => new FakeGrpcMessage('pong'), $this->grpcContext($headers));
+        $unknown = new OutcomeUnknownException('k', final: true);
+
+        $thrown = null;
+        try {
+            $middleware->process($call, static function (IdempotencyCall $c) use ($unknown): never {
+                throw $unknown;
+            });
+            Assert::fail('an OutcomeUnknownException must be mapped to a GRPCException');
+        } catch (GRPCException $e) {
+            $thrown = $e;
+        }
+
+        Assert::notNull($thrown);
+        Assert::same($thrown->getCode(), StatusCode::ABORTED);
+        Assert::same($thrown->getPrevious(), $unknown);
+        Assert::same($thrown->getDetails(), []);
+        Assert::same($headers->get('idempotency-replay'), 'true');
+        Assert::same($headers->get('idempotency-key'), 'k');
+    }
+
+    public function outcomeUnknownOfANestedCallPropagates(): void
+    {
+        $headers = new ResponseHeaders();
+        $middleware = new GrpcOutcomeMiddleware();
+        $nested = new OutcomeUnknownException('inner', final: true);
+        $call = $this->serviceCall(static fn(): never => throw $nested, $this->grpcContext($headers));
+
+        try {
+            $middleware->process(
+                $call,
+                static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+            );
+            Assert::fail('a nested call\'s OutcomeUnknownException must not become ABORTED');
+        } catch (OutcomeUnknownException $e) {
+            Assert::same($e, $nested);
+        }
+
+        Assert::null($headers->get('idempotency-replay'));
+    }
+
+    public function nestedLockedIsStillAbortedWithRetryInfo(): void
+    {
+        $middleware = new GrpcOutcomeMiddleware();
+        $locked = new LockedException(new Locked('inner', 7, new \DateTimeImmutable()));
+        $call = $this->call(static fn(): never => throw $locked);
+
+        $thrown = null;
+        try {
+            $middleware->process(
+                $call,
+                static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+            );
+        } catch (GRPCException $e) {
+            $thrown = $e;
+        }
+
+        Assert::notNull($thrown);
+        Assert::same($thrown->getCode(), StatusCode::ABORTED);
+        Assert::same($thrown->getPrevious(), $locked);
+        Assert::true(($thrown->getDetails()[0] ?? null) instanceof RetryInfo);
+        Assert::string($thrown->getMessage())->contains('depends on');
+    }
+
     public function mapsMissingKeyToInvalidArgument(): void
     {
         $middleware = new GrpcOutcomeMiddleware();
@@ -523,7 +592,7 @@ final class GrpcOutcomeMiddlewareTest
 
     public function nullOutcomeBecomesTheDeclaredEmptyResponse(): void
     {
-        // A fire-once duplicate (AtMostOnce) or a void operation resolves to null. The bridge's Invoker
+        // A void operation resolves to null, on the first call and on a replay. The bridge's Invoker
         // requires a Message — `resultToString(Message $result)` — and its TypeError would surface as a
         // worker error, not a status. The declared response type is materialized instead.
         $middleware = new GrpcOutcomeMiddleware();

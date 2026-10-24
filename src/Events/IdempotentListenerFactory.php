@@ -13,6 +13,7 @@ use Spiral\Idempotency\ArgumentKeyResolver;
 use Spiral\Idempotency\Attribute\Idempotent;
 use Spiral\Idempotency\Exception\MisconfigurationException;
 use Spiral\Idempotency\Exception\MissingKeyException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\IdempotencyContext;
@@ -46,7 +47,8 @@ use Spiral\Idempotency\KeyResolver;
  *
  * A {@see \Spiral\Idempotency\Exception\LockedException} propagates untouched: the PSR-14 dispatcher
  * stops the fan-out at the first exception, so the surrounding redelivery — the durable producer that
- * dispatched the event — is what retries a concurrent duplicate.
+ * dispatched the event — is what retries a concurrent duplicate. An {@see OutcomeUnknownException}
+ * skips the listener silently: its key is consumed either way, and a listener has no outcome to miss.
  *
  * @api
  */
@@ -89,15 +91,26 @@ final readonly class IdempotentListenerFactory implements ListenerFactoryInterfa
         $idempotency = $registry->resolve($attribute->storage);
 
         return function (object $event) use ($inner, $attribute, $scope, $idempotency): void {
-            $idempotency->execute(
-                $this->key($attribute, $event, $scope),
-                fn(IdempotencyContext $context): null => $this->run($inner, $event, $context),
-                new ExecuteOptions(
-                    $attribute->lockTtl,
-                    $attribute->ttl,
-                    $attribute->failurePolicy ?? $this->failurePolicy,
-                ),
-            );
+            $executed = false;
+
+            try {
+                $idempotency->execute(
+                    $this->key($attribute, $event, $scope),
+                    function (IdempotencyContext $context) use ($inner, $event, &$executed): null {
+                        $executed = true;
+
+                        return $this->run($inner, $event, $context);
+                    },
+                    new ExecuteOptions(
+                        $attribute->lockTtl,
+                        $attribute->ttl,
+                        $attribute->failurePolicy ?? $this->failurePolicy,
+                    ),
+                );
+            } catch (OutcomeUnknownException $e) {
+                // Thrown after the listener ran: a nested idempotent call's failure, not a duplicate delivery.
+                $executed and throw $e;
+            }
         };
     }
 

@@ -9,6 +9,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\Exception\MissingKeyException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\Internal\Pipeline\DefaultFailureClassifier;
 use Spiral\Idempotency\Lease\Locked;
@@ -27,6 +28,8 @@ use Spiral\Idempotency\Uncacheable;
  *  - rebuilds the response from the snapshot on the way out (via PSR-17 factories) and adds the
  *    `Idempotency-Key` / `Idempotency-Replay` headers;
  *  - turns a {@see LockedException} into `409 Conflict` + `Retry-After`;
+ *  - turns an {@see OutcomeUnknownException} (an AtMostOnce duplicate with no stored outcome) into
+ *    `409 Conflict` WITHOUT `Retry-After` — nothing tells when, or whether, an outcome gets stored;
  *  - turns a {@see MissingKeyException} into `400 Bad Request` (a missing key is a client error, not a 500);
  *  - wraps a non-cacheable response (default: status >= 500, transient) in {@see Uncacheable}, so the
  *    lease handler releases the key and a retry re-runs instead of replaying the error forever;
@@ -95,8 +98,10 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
     public function process(IdempotencyCall $call, callable $next): mixed
     {
         $executed = false;
-        $encoded = $call->withOperation(function (IdempotencyContext $ctx) use (&$executed, $call): mixed {
+        $ownKey = null;
+        $encoded = $call->withOperation(function (IdempotencyContext $ctx) use (&$executed, &$ownKey, $call): mixed {
             $executed = true;
+            $ownKey = $ctx->getKey();
 
             try {
                 $result = ($call->operation)($ctx);
@@ -111,7 +116,12 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
         try {
             $cached = $next($encoded);
         } catch (LockedException $e) {
-            return $this->conflict($e->lock);
+            // Not guarded by $executed: a nested lock leaves this lease key free and an inbox one rolled
+            // back, so "retry after N" still holds.
+            return $this->conflict($e->lock, $ownKey);
+        } catch (OutcomeUnknownException $e) {
+            // Thrown after the action ran: a nested idempotent call's failure, not a duplicate request.
+            return $executed ? throw $e : $this->outcomeUnknown($e->key);
         } catch (MissingKeyException $e) {
             return $this->badRequest($e->getMessage());
         }
@@ -220,18 +230,43 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
             ->withBody($this->streams->createStream($payload));
     }
 
-    private function conflict(Locked $lock): ResponseInterface
+    /**
+     * @param non-empty-string|null $ownKey this request's key when the lock is held on a nested idempotent
+     *        call's key — announced instead of the inner one; null when this request's own key is locked
+     */
+    private function conflict(Locked $lock, ?string $ownKey = null): ResponseInterface
     {
         $payload = (string) \json_encode([
             'error' => 'conflict',
-            'message' => 'Request with this idempotency key is already being processed.',
+            'message' => $ownKey === null
+                ? 'Request with this idempotency key is already being processed.'
+                : 'An operation this request depends on is already being processed.',
             'retry_after' => $lock->retryAfter,
         ]);
 
         return $this->responses->createResponse(409)
             ->withHeader('Content-Type', 'application/json')
-            ->withHeader('Idempotency-Key', $lock->key)
+            ->withHeader('Idempotency-Key', $ownKey ?? $lock->key)
             ->withHeader('Retry-After', (string) $lock->retryAfter)
             ->withBody($this->streams->createStream($payload));
+    }
+
+    /**
+     * Marked as a replay: the answer comes from the first request's record.
+     *
+     * @param non-empty-string $key
+     */
+    private function outcomeUnknown(string $key): ResponseInterface
+    {
+        $payload = (string) \json_encode([
+            'error' => 'outcome_unknown',
+            'message' => 'The outcome of the original request with this idempotency key is not available.',
+        ]);
+
+        $response = $this->responses->createResponse(409)
+            ->withHeader('Content-Type', 'application/json')
+            ->withBody($this->streams->createStream($payload));
+
+        return $this->decorate($response, $key, replayed: true);
     }
 }
