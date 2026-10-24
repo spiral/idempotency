@@ -8,9 +8,17 @@ customize the mapping.
 
 | Kind | Default mapping | Lease reaction |
 |---|---|---|
-| **Domain** | any other `\Exception`, or a `RetryableExceptionInterface` that is **not** retryable | Cached as a valid negative outcome, replayed on retry |
-| **Infrastructure** | `\Error`, `\Exception` implementing `Retryable`, or a retryable `RetryableExceptionInterface` | Key released; the transport/client retries |
+| **Domain** | any other `\Exception`, a `RetryableExceptionInterface` that is **not** retryable, or a **final** `OutcomeUnknownException` | Cached as a valid negative outcome, replayed on retry |
+| **Infrastructure** | `\Error`, `\Exception` implementing `Retryable`, a retryable `RetryableExceptionInterface`, a `LockedException`, or a non-final `OutcomeUnknownException` | Key released; the transport/client retries |
 | **Bug** | only via explicit config: `DefaultFailureClassifier(bugExceptions: [...])` | Key released; no re-enqueue — report and fix |
+
+A `LockedException` / `OutcomeUnknownException` thrown by the operation comes from a nested
+idempotent call. A lock is transient: an outer lease key is released (an outer inbox rolls back) and
+a retry re-runs; an outer AtMostOnce key is already consumed, so its retry gets the unknown-outcome
+answer. An unknown
+outcome follows its `$final` flag: `true` (inner AtMostOnce with `cacheResult` off — it answers the
+same forever) is cached as Domain, so the outer operation does not repeat its other effects on every
+retry; `false` (the inner result may still be stored) releases the outer key.
 
 `RetryableExceptionInterface` is `spiral/queue`'s own retry contract: a job exception that already
 states its retry intent for the broker is read the same way here, so it needs no second marker. The
@@ -92,7 +100,7 @@ by different code — over HTTP that means a **different status code**, unless y
    Bind it in a bootloader (`DomainFailureRenderer::class => DeclineRenderer::class`).
    Only `FailureKind::Domain` failures reach the renderer; Infrastructure and Bug ones stay
    exceptions (key released, retry re-runs). The `cacheable` predicate still applies — a rendered
-   5xx is not cached either. Rows written *before* the renderer was bound keep replaying as a throw.
+   5xx is not cached on a lease either. Rows written *before* the renderer was bound keep replaying as a throw.
 3. **Map `CachedDomainFailureException::$originalClass`** in the application exception handler.
 
 Over gRPC none of this is needed: a negative outcome *is* a status, and code + message + details is

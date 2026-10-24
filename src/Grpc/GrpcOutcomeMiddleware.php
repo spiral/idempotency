@@ -8,6 +8,7 @@ use Google\Protobuf\Duration;
 use Google\Rpc\RetryInfo;
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\Exception\MissingKeyException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\IdempotencyContext;
 use Spiral\Idempotency\Internal\Pipeline\DefaultFailureClassifier;
 use Spiral\Idempotency\Pipeline\FailureClassifier;
@@ -36,10 +37,13 @@ use Spiral\RoadRunner\GRPC\StatusCode;
  *    {@see GRPCException} with {@see StatusCode::ABORTED} — the gRPC status the spec recommends for
  *    "retry at a higher level", the analog of the HTTP `409 Conflict` — carrying a
  *    {@see RetryInfo} detail with the suggested delay (the analog of `Retry-After`);
+ *  - turns an {@see OutcomeUnknownException} (an AtMostOnce duplicate with no stored outcome) into
+ *    {@see StatusCode::ABORTED} marked as a replay, WITHOUT {@see RetryInfo} — nothing tells when, or
+ *    whether, an outcome gets stored;
  *  - turns a {@see MissingKeyException} into {@see StatusCode::INVALID_ARGUMENT} (a client error, the
  *    analog of HTTP `400 Bad Request`);
- *  - materializes the method's declared response for a `null` outcome (fire-once duplicate / void
- *    operation), which gRPC has no room for — see {@see self::emptyResponse()};
+ *  - materializes the method's declared response for a `null` outcome (a void operation, replayed or
+ *    not), which gRPC has no room for — see {@see self::emptyResponse()};
  *  - announces the outcome in the response metadata (`idempotency-replay`, `idempotency-key`), the analog
  *    of the HTTP replay headers — see {@see self::mark()}.
  *
@@ -135,13 +139,28 @@ final readonly class GrpcOutcomeMiddleware implements ResolutionMiddleware
         try {
             $cached = $next($encoded);
         } catch (LockedException $e) {
+            // Not guarded by $executed: a nested lock leaves this lease key free and an inbox one rolled
+            // back, so "retry after N" still holds.
             throw new GRPCException(
                 \sprintf(
-                    'Request with this idempotency key is already being processed (retry after %ds).',
+                    $executed
+                        ? 'An operation this request depends on is already being processed (retry after %ds).'
+                        : 'Request with this idempotency key is already being processed (retry after %ds).',
                     $e->lock->retryAfter,
                 ),
                 StatusCode::ABORTED,
                 $this->retryInfo($e->lock->retryAfter),
+                previous: $e,
+            );
+        } catch (OutcomeUnknownException $e) {
+            // Thrown after the method ran: a nested idempotent call's failure, not a duplicate request.
+            $executed and throw $e;
+
+            $this->mark($call->context, $e->key, replayed: true);
+
+            throw new GRPCException(
+                'The outcome of the original request with this idempotency key is not available.',
+                StatusCode::ABORTED,
                 previous: $e,
             );
         } catch (MissingKeyException $e) {
@@ -216,10 +235,10 @@ final readonly class GrpcOutcomeMiddleware implements ResolutionMiddleware
     }
 
     /**
-     * A dedup hit that has no cached message resolves to `null` — the AtMostOnce guard's duplicate path, or
-     * a void operation. Over gRPC that is not a valid answer: the bridge's `Invoker::resultToString()`
-     * requires a {@see \Google\Protobuf\Internal\Message}, and the TypeError it would raise degrades into a
-     * worker error (`Server::serve()` catches non-`GRPCExceptionInterface` throwables) instead of a status.
+     * A void operation resolves to `null`, on the first call and on its replay alike. Over gRPC that is not
+     * a valid answer: the bridge's `Invoker::resultToString()` requires a
+     * {@see \Google\Protobuf\Internal\Message}, and the TypeError it would raise degrades into a worker
+     * error (`Server::serve()` catches non-`GRPCExceptionInterface` throwables) instead of a status.
      *
      * So materialize the response the service method declares — empty, deterministic, and identical on
      * every replay. Nothing extra is cached: the stored outcome stays `null` and this runs on the way out.

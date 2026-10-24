@@ -46,8 +46,10 @@ use Spiral\Idempotency\KeyResolver;
  * stack is treated as a misconfiguration: {@see IdempotencyConfig::getTransport()} throws
  * {@see MisconfigurationException} on the first `#[Idempotent]` call rather than running an empty
  * pipeline that silently disables idempotency. An explicit `'queue' => []` is valid (key comes only from
- * the attribute, no queue middleware); the `transports` section as a whole stays optional for an app
- * that registers no transport bootloader at all.
+ * the attribute) but drops {@see \Spiral\Idempotency\Queue\QueueRetryMiddleware}: a `Locked` collision
+ * and an AtMostOnce duplicate then reach Spiral's retry policy as plain failures, so keep at least
+ * `[QueueRetryMiddleware::class]`. The `transports` section as a whole stays optional for an app that
+ * registers no transport bootloader at all.
  *
  * @api
  */

@@ -14,10 +14,12 @@ use Spiral\Idempotency\StorageFactory;
  *
  * The dedup marker commits before the effect and is never removed, so the effect runs at most once and
  * a duplicate is *refused* rather than re-run (a repeat is therefore NOT safe to retry). This guards
- * the effect (≤ 1) but does not cache the answer by default: a duplicate gets `null`.
+ * the effect (≤ 1) but does not cache the answer by default: a duplicate throws
+ * {@see \Spiral\Idempotency\Exception\OutcomeUnknownException}.
  *
  * Set {@see $cacheResult} to also store and replay the operation result — best-effort only: the marker
- * and the result are not committed atomically, so a crash between them loses the cache (not the dedup).
+ * and the result are not committed atomically, so a crash between them loses the cache (not the dedup),
+ * and that duplicate throws the same exception.
  * Atomic marker + result is the upgrade to {@see \Spiral\Idempotency\Driver\Cycle\CycleInboxConfig}.
  *
  * Security: with {@see $cacheResult} on, results are (de)serialized by the storage's
@@ -32,8 +34,9 @@ final class CycleAtMostOnceConfig extends StorageConfig
     /**
      * @param string|null $connection DBAL database name (null = the default database)
      * @param non-empty-string $table dedup-guard table
-     * @param bool $cacheResult store the operation result and best-effort replay it on a duplicate
-     *        (default off: a duplicate gets `null`)
+     * @param bool $cacheResult store the operation result — `null` and an {@see \Spiral\Idempotency\Uncacheable}
+     *        value included — and best-effort replay it on a duplicate (default off: a duplicate throws
+     *        {@see \Spiral\Idempotency\Exception\OutcomeUnknownException})
      * @param int|null $retentionTtl dedup-marker retention, seconds. `null` (default) keeps markers
      *        forever (the "at most once" guarantee never weakens; GC skips this storage). A positive
      *        value lets {@see \Spiral\Idempotency\Driver\Cycle\CycleGarbageCollector} delete rows whose

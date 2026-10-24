@@ -1,6 +1,6 @@
 ---
 name: spiral-idempotency
-description: "Set up and use the spiral/idempotency package — protect HTTP endpoints, queue jobs, gRPC methods, and PSR-14 event listeners from duplicated side-effects on retries. Use when adding #[Idempotent] to a handler, configuring app/config/idempotency.php, choosing between AtLeastOnce / AtMostOnce / ExactlyOnce guarantees, wiring IdempotencyInterceptor into a domain core, handling Idempotency-Key headers, or debugging replayed responses / LockedException / MissingKeyException. Trigger on \"idempotent\", \"idempotency key\", \"deduplicate requests/jobs\", \"exactly once\", \"response replay\", \"transactional inbox\"."
+description: "Set up and use the spiral/idempotency package — protect HTTP endpoints, queue jobs, gRPC methods, and PSR-14 event listeners from duplicated side-effects on retries. Use when adding #[Idempotent] to a handler, configuring app/config/idempotency.php, choosing between AtLeastOnce / AtMostOnce / ExactlyOnce guarantees, wiring IdempotencyInterceptor into a domain core, handling Idempotency-Key headers, or debugging replayed responses / LockedException / OutcomeUnknownException / MissingKeyException. Trigger on \"idempotent\", \"idempotency key\", \"deduplicate requests/jobs\", \"exactly once\", \"response replay\", \"transactional inbox\"."
 ---
 
 # spiral/idempotency — setup and usage
@@ -17,7 +17,7 @@ behind semantic storage aliases. For anything not covered by this skill, read
 | Guarantee | Mechanism | Use when |
 |---|---|---|
 | **AtLeastOnce** | Lease: lock + fencing token, result cached and replayed | Default. External effects (payment gateway, email). Effect may repeat inside the crash window |
-| **AtMostOnce** | Dedup-guard: marker commits *before* the effect, duplicate is **refused** — SQL table (`CycleAtMostOnceConfig`) or Redis/Valkey `SET NX EX` (`RedisAtMostOnceConfig`) | Losing the effect is safer than repeating it (fire-once jobs). Duplicate gets `null` |
+| **AtMostOnce** | Dedup-guard: marker commits *before* the effect, duplicate is **refused** — SQL table (`CycleAtMostOnceConfig`) or Redis/Valkey `SET NX EX` (`RedisAtMostOnceConfig`) | Losing the effect is safer than repeating it (fire-once jobs). Duplicate is never re-run: it replays a stored result (`cacheResult`) or gets `OutcomeUnknownException` |
 | **ExactlyOnce** (effect) | Inbox: `INSERT ... ON CONFLICT DO NOTHING` + side-effect in **one DB transaction** | Only when the whole effect writes to the same database as the inbox record |
 
 ## Where to go
@@ -51,7 +51,8 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
 
 - Reference `IdempotencyInterceptor` (alias), never the concrete `PipelineIdempotencyInterceptor`.
 - Every registered transport bootloader needs its `transports.<name>` entry in config — `[]` is
-  valid, a missing one throws on the first `#[Idempotent]` call. The `transports` section as a whole
+  valid but drops the outcome middleware (no Locked / AtMostOnce-duplicate mapping — on the queue
+  neither re-enqueue nor ACK), a missing one throws on the first `#[Idempotent]` call. The `transports` section as a whole
   is optional (no transport bootloader → omit it). Events are the exception: no interceptor, no
   config entry.
 - `#[Idempotent]` without `storage:` takes the config's `default` alias; with no `default` set it
@@ -68,7 +69,15 @@ Both scripts are read-only; `<this-skill-dir>` is the directory containing this 
   AtLeastOnce.
 - Default `PhpSerializer` runs `unserialize()` on replay — the idempotency table/keyspace is the
   trust boundary. Multiple writers → bind a JSON `SerializerInterface` and keep results JSON-safe.
-- `5xx` (HTTP) / transient statuses (gRPC) are not cached by design — retries re-run.
+- `5xx` (HTTP) / transient statuses (gRPC) are not cached on a **lease** storage — retries re-run.
+  Inbox and at-most-once never re-run: the inbox (and at-most-once with `cacheResult`) stores that
+  answer and replays it; without `cacheResult` an at-most-once duplicate gets 409 / ABORTED.
+- An AtMostOnce duplicate with no stored outcome is `OutcomeUnknownException`, not `null`: HTTP
+  `409` without `Retry-After`, gRPC `ABORTED` without `RetryInfo`, queue ACK (needs
+  `QueueRetryMiddleware` in the stack), event listener skipped; a direct `execute()` throws it.
+  Without `cacheResult` no outcome ever appears; with it the first run may still be running, and a
+  later retry may replay its result. Upgrading: a Cycle row an earlier release wrote for a
+  null-returning first run (`cacheResult` on) holds a NULL `result` and now answers as unknown.
 - A failing **queue** job releases its key by default (`FailurePolicy::Release`), an HTTP/gRPC failure
   is cached; set `failurePolicy:` on `#[Idempotent]` when the operation needs the other one.
 - Setting `retentionTtl` on inbox/at-most-once narrows the dedup window — swept records mean a
