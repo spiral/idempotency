@@ -6,11 +6,13 @@ namespace Spiral\Idempotency\Tests\Unit\Queue;
 
 use Spiral\Idempotency\Exception\LockedException;
 use Spiral\Idempotency\Exception\MissingKeyException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Lease\Locked;
 use Spiral\Idempotency\Pipeline\IdempotencyCall;
 use Spiral\Idempotency\Queue\QueueRetryMiddleware;
 use Spiral\Idempotency\Queue\RetryableLockException;
+use Spiral\Idempotency\Tests\Unit\Stub\StubIdempotencyContext;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Expect;
@@ -45,6 +47,60 @@ final class QueueRetryMiddlewareTest
         $result = $middleware->process($this->call(), static fn(IdempotencyCall $call): mixed => null);
 
         Assert::same($result, null);
+    }
+
+    public function acksOutcomeUnknownDuplicate(): void
+    {
+        $middleware = new QueueRetryMiddleware();
+
+        $result = $middleware->process($this->call(), static function (IdempotencyCall $call): never {
+            throw new OutcomeUnknownException('k', final: true);
+        });
+
+        Assert::null($result);
+    }
+
+    public function outcomeUnknownOfANestedCallPropagates(): void
+    {
+        $middleware = new QueueRetryMiddleware();
+        $nested = new OutcomeUnknownException('inner', final: true);
+        $call = new IdempotencyCall(
+            context: new \stdClass(),
+            operation: static fn(): never => throw $nested,
+            options: new ExecuteOptions(),
+        );
+
+        try {
+            $middleware->process(
+                $call,
+                static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+            );
+            Assert::fail('a nested call\'s OutcomeUnknownException must not ACK the job');
+        } catch (OutcomeUnknownException $e) {
+            Assert::same($e, $nested);
+            Assert::same($e->key, 'inner');
+        }
+    }
+
+    public function nestedLockedStillReEnqueuesTheJob(): void
+    {
+        $middleware = new QueueRetryMiddleware();
+        $locked = new LockedException(new Locked('inner', 7, new \DateTimeImmutable()));
+        $call = new IdempotencyCall(
+            context: new \stdClass(),
+            operation: static fn(): never => throw $locked,
+            options: new ExecuteOptions(),
+        );
+
+        try {
+            $middleware->process(
+                $call,
+                static fn(IdempotencyCall $c): mixed => ($c->operation)(new StubIdempotencyContext()),
+            );
+            Assert::fail('a nested LockedException must still re-enqueue the job');
+        } catch (RetryableLockException $e) {
+            Assert::same($e->getPrevious(), $locked);
+        }
     }
 
     public function mapsLockedExceptionToRetryable(): void

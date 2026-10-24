@@ -20,6 +20,9 @@ interface Idempotency
      * Run {@see $operation} idempotently under {@see $key}. On replay the cached result is returned
      * instead of executing the operation again.
      *
+     * A replayed `null` is a stored outcome; an AtMostOnce duplicate with no outcome to replay throws
+     * {@see Exception\OutcomeUnknownException} instead of re-running or inventing an answer.
+     *
      * This programmatic path takes the {@see $key} as the final, authoritative key — it is NOT
      * namespaced automatically. Operation-identity namespacing (so the same client key on two endpoints
      * does not collide) is applied only on the attribute/interceptor path via
@@ -33,6 +36,8 @@ interface Idempotency
      * @param ExecuteOptions|null $options per-call overrides (TTLs, failure policy); null fields fall
      *        back to the storage's configured defaults
      * @return T
+     * @throws Exception\LockedException the key is held by another in-flight execution (lease)
+     * @throws Exception\OutcomeUnknownException a duplicate with no outcome to replay (AtMostOnce)
      */
     public function execute(string $key, \Closure $operation, ?ExecuteOptions $options = null): mixed;
 }
