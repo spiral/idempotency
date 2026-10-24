@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/spiral/idempotency/compare/0.4.1...0.5.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **at-most-once:** the default classifier treats `LockedException` and a non-final `OutcomeUnknownException` thrown by an operation as Infrastructure (an outer lease releases its key and a retry re-runs), and a final `OutcomeUnknownException` as Domain (the outer lease caches it).
+
+### Features
+
+* **redis:** AtMostOnce dedup-guard over Valkey/Redis ([#26](https://github.com/spiral/idempotency/issues/26)) ([aaabd13](https://github.com/spiral/idempotency/commit/aaabd13e97b665e4edf8115ce7a9611149b9ce6d))
+
+
+### Bug Fixes
+
+* **at-most-once:** signal an unknown outcome instead of replaying null ([#28](https://github.com/spiral/idempotency/issues/28)) ([0b96c7e](https://github.com/spiral/idempotency/commit/0b96c7e72f0a33cca15a82b7b13d26d369ef9f9c))
+
 ## [0.4.1](https://github.com/spiral/idempotency/compare/0.4.0...0.4.1) (2026-09-16)
 
 
