@@ -38,7 +38,10 @@ use Spiral\Idempotency\Attribute\Idempotent;
   middleware supply it (HTTP header/field, job header, gRPC metadata). A path resolving to nothing —
   or to a value with no string form (array, plain object, null, bool) — fails fast.
 - `lockTtl` / `ttl` — per-operation overrides (lockTtl: lease driver only; the inbox ignores it —
-  its mutual exclusion is the row lock of the in-progress INSERT, not a time-bound lease).
+  its mutual exclusion is the row lock of the in-progress INSERT, not a time-bound lease). `ttl` is
+  the completed-record retention on lease storages, the dedup window (from the claim) on
+  `RedisAtMostOnceConfig` (below 1 it throws before the effect), and ignored by `CycleInboxConfig` /
+  `CycleAtMostOnceConfig`.
 - `failurePolicy` — `FailurePolicy::Cache` (a Domain failure becomes a cached, replayed outcome) or
   `FailurePolicy::Release` (any failure frees the key, the original throwable is rethrown and the next
   call re-runs). `null` = the transport default: queue and events `Release`, HTTP/gRPC `Cache`. Lease storages

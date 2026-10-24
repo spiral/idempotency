@@ -17,7 +17,8 @@ final readonly class ExecuteOptions
      * @param int<1, max>|null $lockTtl PROCESSING lock TTL, seconds. Applies to the lease/AtLeastOnce
      *        driver only; the inbox/ExactlyOnce driver ignores it (mutual exclusion there is the row
      *        lock of the in-progress INSERT, not a time-bound lease).
-     * @param int<1, max>|null $ttl retention TTL of the completed record, seconds.
+     * @param int<1, max>|null $ttl retention TTL of the completed record, seconds. On the Redis
+     *        at-most-once driver it is the marker TTL, i.e. the dedup window.
      * @param FailurePolicy|null $failurePolicy what the lease does with the key when the operation
      *        throws; null = the transport default (attribute path) or {@see FailurePolicy::Cache} on a
      *        direct call. Ignored by the inbox/at-most-once drivers, whose record is terminal once

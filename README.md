@@ -26,8 +26,9 @@ Optional packages:
 - `spiral/events` — the PSR-14 events transport (`EventsIdempotencyBootloader`,
   `IdempotentListenerFactory`), making individual `#[Listener]` methods idempotent with a per-listener
   key;
-- `predis/predis` — the default client for the Redis/Valkey lease backend (`RedisLeaseConfig`): AtLeastOnce
-  storage over a Redis-compatible server, with server-side TTL (no GC needed) and atomic Lua CAS. Not
+- `predis/predis` — the default client for the Redis/Valkey backends: the AtLeastOnce lease
+  (`RedisLeaseConfig`) and the AtMostOnce dedup-guard (`RedisAtMostOnceConfig`), both over a
+  Redis-compatible server (Valkey, Redis) with server-side TTL (no GC needed) and atomic Lua scripts. Not
   needed when `Driver\Redis\RedisCommands` is bound to an adapter over the app's own Redis client;
 - `spiral/cycle-bridge` — integrates the idempotency tables into the ORM schema
   (`cycle:sync` / `cycle:migrate`).
@@ -142,7 +143,42 @@ Storage drivers available under `storages`:
 | `Driver\Cycle\CycleInboxConfig`       | ExactlyOnce | Inbox table; the record and the side-effect commit in one transaction                                    |
 | `Driver\Cycle\CycleAtMostOnceConfig`  | AtMostOnce  | Dedup-guard table                                                                                        |
 | `Driver\Redis\RedisLeaseConfig`       | AtLeastOnce | Redis/Valkey hash with server-side TTL — no GC needed                                                    |
+| `Driver\Redis\RedisAtMostOnceConfig`  | AtMostOnce  | Redis/Valkey `SET NX EX` marker; its TTL (`retentionTtl`, default 86400 s) is the dedup window — no GC needed |
 | `Driver\Memory\MemoryLeaseConfig`     | AtLeastOnce | Per-process PHP array. Dedup holds only inside the worker that acquired the lease and dies with it — for tests and local development, not for production traffic |
+
+Both Redis configs take the connection from the container: a `Driver\Redis\RedisCommands` binding (an
+adapter over any client), else a `\Predis\ClientInterface` binding. The lease needs Redis 4.0+
+(multi-field `HSET`); the at-most-once marker runs on Redis 3.2+; any Valkey runs both. A fire-once
+job storage on Valkey:
+
+```php
+use Spiral\Idempotency\Driver\Redis\RedisAtMostOnceConfig;
+
+'storages' => [
+    'jobs' => new RedisAtMostOnceConfig(
+        keyPrefix: 'idempotency-amo:', // must not start with a RedisLeaseConfig prefix, nor it with this one
+        retentionTtl: 86400,           // dedup window: a duplicate after it RE-EXECUTES
+        cacheResult: false,            // true: best-effort replay of the result instead of OutcomeUnknownException
+    ),
+],
+```
+
+The marker is set before the operation and never removed — a throwing operation is not re-run, whatever
+the failure policy. `cacheResult` writes the result as a second step after the effect: a crash, or a
+Redis error (logged, not thrown), between the two loses the replay (that duplicate gets the
+unknown-outcome answer), never the dedup; a `null` result is stored and replayed too. Unlike
+`CycleAtMostOnceConfig`, whose markers live forever by default, a Redis marker always expires, and its
+window counts from the claim, not from completion: an operation that outlives it lets a concurrent
+duplicate claim the key and run the effect again. Pick a `retentionTtl` above the longest operation plus
+the longest redelivery/replay delay; `ttl:` on `#[Idempotent]` overrides it per operation (below 1 it throws
+before the effect, like a `retentionTtl` below 1 fails when the storage is built).
+
+> [!WARNING]
+> A marker the server drops early re-opens the key to a duplicate, so the at-most-once storage needs a
+> server that keeps its volatile keys: `maxmemory-policy noeviction` (any `volatile-*`/`allkeys-*`
+> policy may evict markers, `volatile-ttl` the short-lived ones first — use a dedicated instance if a
+> shared one must evict) and AOF persistence (a restart from an RDB snapshot or none loses recent
+> markers). Replication is asynchronous, so a failover can still lose the latest claims.
 
 Add **one line** to your existing domain-core interceptor list — reference the
 `IdempotencyInterceptor` alias, not a concrete class:
@@ -452,7 +488,7 @@ listener whose failure is a final answer.
 | `storage` | Semantic alias from the config — the only infrastructure reference in business code. Omit it to take the config's `default` alias                                 |
 | `key`     | Dot-notation path over the **call arguments**, resolved by `ArgumentKeyResolver`: the leaf may be a non-boolean scalar, a `Stringable` (domain id) or a backed enum. `null` lets a transport middleware supply the key (HTTP header/field). A path that resolves to nothing fails fast |
 | `lockTtl` | Override of the PROCESSING lock TTL, seconds (lease driver only)                                                                                                 |
-| `ttl`     | Override of the completed-record retention TTL, seconds                                                                                                          |
+| `ttl`     | Override of the completed-record retention TTL, seconds (lease storages). On `RedisAtMostOnceConfig` it is the dedup window, counted from the claim (below 1 it throws before the effect); `CycleInboxConfig` and `CycleAtMostOnceConfig` ignore it |
 | `scope`   | Key namespace, see below                                                                                                                                         |
 | `failurePolicy` | What a thrown failure does to the key: `Cache` (replay it) or `Release` (free the key, the next call re-runs). `null` = the transport default, see below   |
 

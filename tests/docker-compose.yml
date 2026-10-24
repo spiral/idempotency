@@ -7,8 +7,8 @@
 # Ports/credentials match the DB_* defaults in tests/Acceptance/Testo/DatabaseDriver.php, so a local
 # run needs no env vars. Data is on tmpfs (fast, ephemeral) — fine, tables are recreated per run.
 #
-# The Redis lease-driver acceptance test connects to Valkey (a Redis 7.2-compatible, drop-in fork)
-# at 127.0.0.1:16379 (overridable via REDIS_HOST / REDIS_PORT); it is skipped if unreachable.
+# The Redis acceptance tests (lease and at-most-once) connect to Valkey (a Redis 7.2-compatible, drop-in fork)
+# at 127.0.0.1:16379 (overridable via REDIS_HOST / REDIS_PORT); they are skipped if it is unreachable.
 services:
   postgres:
     image: postgres:17-alpine

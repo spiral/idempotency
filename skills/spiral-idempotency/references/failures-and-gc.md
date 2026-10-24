@@ -40,9 +40,11 @@ Defaults follow who owns the retry — queue: `Release` (the broker redelivers),
 operation: `#[Idempotent(..., failurePolicy: FailurePolicy::Release)]` or
 `new ExecuteOptions(failurePolicy: ...)`.
 
-Lease/AtLeastOnce storages only. The inbox and at-most-once drivers ignore the policy: an inbox failure
-already rolls the dedup row back together with the side-effect, and a committed record of either driver
-is terminal — releasing it would run the effect twice.
+Lease/AtLeastOnce storages only. The inbox and at-most-once drivers (SQL and Redis) ignore the policy:
+an inbox failure already rolls the dedup row back together with the side-effect, and a committed record
+of either driver is terminal — releasing it would run the effect twice. An at-most-once operation that
+throws propagates its throwable; the marker stays and every retry is refused with
+`OutcomeUnknownException`.
 
 With `Release` there is no cached negative outcome, so nothing below about failure replay applies to
 such an operation.
@@ -121,6 +123,13 @@ worst expected redelivery delay.
 Scheduling the GC (cron, `spiral/scheduler`, a console command) is the application's policy — the
 package does not run it by itself. The Redis lease needs no GC: server-side `EXPIRE` carries both
 TTLs, an expired lease simply vanishes; the in-memory lease prunes expired records on read.
+
+`RedisAtMostOnceConfig` needs no GC either, but it has no "keep forever": the marker is written with
+`SET NX EX retentionTtl` (default 86400 s, `ttl:` on `#[Idempotent]` overrides it per operation; a
+`retentionTtl` below 1 fails fast, a `ttl:` below 1 throws before the effect), so the dedup window is
+always finite and counts from the claim — choose it above the longest operation plus the worst
+redelivery delay. A marker evicted or lost on a restart/failover ends the window early: run it on
+`maxmemory-policy noeviction` with AOF persistence.
 
 ## Customization points
 
