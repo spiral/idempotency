@@ -9,6 +9,7 @@ use Spiral\Idempotency\Driver\Redis\Internal\RedisAtMostOnceDriver;
 use Spiral\Idempotency\Driver\Redis\RedisCommands;
 use Spiral\Idempotency\Exception\IdempotencyException;
 use Spiral\Idempotency\Exception\MisconfigurationException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\FailurePolicy;
 use Spiral\Idempotency\Guarantee;
@@ -35,7 +36,7 @@ final class RedisAtMostOnceDriverTest
         Assert::same($this->driver(new FakeRedisCommands())->guarantee(), Guarantee::AtMostOnce);
     }
 
-    public function runsTheEffectOnceAndRefusesTheDuplicateWithNull(): void
+    public function runsTheEffectOnceAndRefusesTheDuplicateWithAnUnknownOutcome(): void
     {
         $driver = $this->driver(new FakeRedisCommands());
         $calls = 0;
@@ -45,7 +46,7 @@ final class RedisAtMostOnceDriverTest
         };
 
         Assert::same($driver->execute('k', $op), 'v:k');
-        Assert::null($driver->execute('k', $op));
+        $this->assertOutcomeUnknown($driver, 'k', $op);
         Assert::same($calls, 1);
     }
 
@@ -103,7 +104,7 @@ final class RedisAtMostOnceDriverTest
         } catch (\RuntimeException) {
         }
 
-        Assert::null($driver->execute('k', $op));
+        $this->assertOutcomeUnknown($driver, 'k', $op);
         Assert::same($calls, 1);
     }
 
@@ -125,7 +126,7 @@ final class RedisAtMostOnceDriverTest
         }
 
         Assert::true(isset($redis->store['amo:k']));
-        Assert::null($driver->execute('k', $op, $options));
+        $this->assertOutcomeUnknown($driver, 'k', $op, $options);
         Assert::same($calls, 1);
     }
 
@@ -171,26 +172,52 @@ final class RedisAtMostOnceDriverTest
         Assert::same($redis->store['amo:k']['value'], 'R:' . \serialize(['id' => 42]));
     }
 
-    public function aDuplicateBeforeTheResultLandsGetsNull(): void
+    public function aDuplicateBeforeTheResultLandsIsAnOutcomeNotYetKnown(): void
     {
         // Inside the first operation only the marker exists, so the cache has nothing to replay yet.
         $driver = $this->driver(new FakeRedisCommands(), cacheResult: true);
-        $inner = 'unset';
 
-        $driver->execute('k', static function () use ($driver, &$inner): string {
-            $inner = $driver->execute('k', static fn(): string => 'never');
+        $driver->execute('k', function () use ($driver): string {
+            $this->assertOutcomeUnknown($driver, 'k', static fn(): string => 'never', final: false);
             return 'v';
         });
-
-        Assert::null($inner);
     }
 
-    public function aNullResultIsNotWritten(): void
+    public function aDuplicateOfAThrowingEffectWithTheResultCacheIsAnOutcomeNotYetKnown(): void
     {
-        $redis = new FakeRedisCommands();
-        $this->driver($redis, cacheResult: true)->execute('k', static fn(): mixed => null);
+        // The first run never reached the result write: the cache is on, yet there is nothing to replay.
+        $driver = $this->driver(new FakeRedisCommands(), cacheResult: true);
+        $calls = 0;
+        $op = static function () use (&$calls): never {
+            ++$calls;
+            throw new \RuntimeException('boom');
+        };
 
-        Assert::count($redis->calls, 1);
+        try {
+            $driver->execute('k', $op);
+            Assert::fail('the operation must propagate its RuntimeException');
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertOutcomeUnknown($driver, 'k', $op, final: false);
+        Assert::same($calls, 1);
+    }
+
+    public function aNullResultIsStoredAndReplayed(): void
+    {
+        // A stored null is a real outcome (a void operation), distinct from the bare marker.
+        $redis = new FakeRedisCommands();
+        $driver = $this->driver($redis, cacheResult: true);
+        $calls = 0;
+        $op = static function () use (&$calls): null {
+            ++$calls;
+            return null;
+        };
+
+        Assert::null($driver->execute('k', $op));
+        Assert::same($redis->store['amo:k']['value'], 'R:' . \serialize(null));
+        Assert::null($driver->execute('k', $op));
+        Assert::same($calls, 1);
     }
 
     public function anUncacheableResultIsUnwrapped(): void
@@ -293,7 +320,7 @@ final class RedisAtMostOnceDriverTest
         Assert::same(
             $logger->records[0]['message'],
             'Idempotency at-most-once result for key "{key}" was not cached; the effect ran, '
-            . 'a duplicate will get null.',
+            . 'a duplicate will get an unknown outcome.',
         );
         Assert::same($logger->records[0]['context']['key'], 'k');
         Assert::same($logger->records[0]['context']['exception'], $failure);
@@ -324,16 +351,17 @@ final class RedisAtMostOnceDriverTest
 
     #[DataSet([[0]], 'bare refusal')]
     #[DataSet([[0, 'M:other']], 'refusal with a marker')]
-    public function aRefusalReplyDoesNotRunTheEffect(array $reply): void
+    #[DataSet([[0, null]], 'refusal with nil')]
+    public function aRefusalReplyWithoutAStoredResultDoesNotRunTheEffect(array $reply): void
     {
         $calls = 0;
+        $driver = $this->driver($this->replying($reply), cacheResult: true);
 
-        $result = $this->driver($this->replying($reply), cacheResult: true)->execute('k', static function () use (&$calls): string {
+        $this->assertOutcomeUnknown($driver, 'k', static function () use (&$calls): string {
             ++$calls;
             return 'v';
-        });
+        }, final: false);
 
-        Assert::null($result);
         Assert::same($calls, 0);
     }
 
@@ -364,6 +392,26 @@ final class RedisAtMostOnceDriverTest
         }
 
         Assert::same($calls, 0);
+    }
+
+    /**
+     * @param non-empty-string $key
+     * @param bool $final expected: true without the result cache, false when one may still be stored
+     */
+    private function assertOutcomeUnknown(
+        RedisAtMostOnceDriver $driver,
+        string $key,
+        \Closure $operation,
+        ?ExecuteOptions $options = null,
+        bool $final = true,
+    ): void {
+        try {
+            $driver->execute($key, $operation, $options);
+            Assert::fail('a duplicate without a stored outcome must throw OutcomeUnknownException');
+        } catch (OutcomeUnknownException $e) {
+            Assert::same($e->key, $key);
+            Assert::same($e->final, $final);
+        }
     }
 
     private function driver(RedisCommands $redis, int $retentionTtl = 86400, bool $cacheResult = false): RedisAtMostOnceDriver

@@ -158,14 +158,15 @@ use Spiral\Idempotency\Driver\Redis\RedisAtMostOnceConfig;
     'jobs' => new RedisAtMostOnceConfig(
         keyPrefix: 'idempotency-amo:', // must not start with a RedisLeaseConfig prefix, nor it with this one
         retentionTtl: 86400,           // dedup window: a duplicate after it RE-EXECUTES
-        cacheResult: false,            // true: best-effort replay of the result instead of null
+        cacheResult: false,            // true: best-effort replay of the result instead of OutcomeUnknownException
     ),
 ],
 ```
 
 The marker is set before the operation and never removed — a throwing operation is not re-run, whatever
 the failure policy. `cacheResult` writes the result as a second step after the effect: a crash, or a
-Redis error (logged, not thrown), between the two loses the replay, never the dedup. Unlike
+Redis error (logged, not thrown), between the two loses the replay (that duplicate gets the
+unknown-outcome answer), never the dedup; a `null` result is stored and replayed too. Unlike
 `CycleAtMostOnceConfig`, whose markers live forever by default, a Redis marker always expires, and its
 window counts from the claim, not from completion: an operation that outlives it lets a concurrent
 duplicate claim the key and run the effect again. Pick a `retentionTtl` above the longest operation plus

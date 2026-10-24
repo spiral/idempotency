@@ -14,7 +14,8 @@ use Spiral\Idempotency\StorageFactory;
  *
  * The marker is one string key at `{keyPrefix}{key}`, claimed by an atomic `SET ... NX EX` *before* the
  * effect and never removed on any outcome, so the effect runs at most once and a duplicate is *refused*
- * rather than re-run (a repeat is therefore NOT safe to retry). A duplicate gets `null` by default.
+ * rather than re-run (a repeat is therefore NOT safe to retry). By default a duplicate throws
+ * {@see \Spiral\Idempotency\Exception\OutcomeUnknownException}.
  *
  * The TTL is the deduplication window, counted from the claim (not from completion): once the marker
  * expires, a duplicate is no longer recognized and RE-EXECUTES — even one arriving while the first
@@ -29,8 +30,8 @@ use Spiral\Idempotency\StorageFactory;
  *
  * Set {@see $cacheResult} to also store and replay the operation result — best-effort only: the result
  * is a second write after the effect, so a crash or a Redis error between the two loses the cache (not
- * the dedup). Atomic marker + result needs one transaction around the effect, i.e. the Cycle inbox
- * ({@see \Spiral\Idempotency\Driver\Cycle\CycleInboxConfig}).
+ * the dedup), and that duplicate throws the same exception. Atomic marker + result needs one transaction
+ * around the effect, i.e. the Cycle inbox ({@see \Spiral\Idempotency\Driver\Cycle\CycleInboxConfig}).
  *
  * The connection comes from the container exactly as for {@see RedisLeaseConfig}: a {@see RedisCommands}
  * binding, or a `\Predis\ClientInterface` binding wrapped in {@see PredisCommands}.
@@ -52,8 +53,9 @@ final class RedisAtMostOnceConfig extends StorageConfig
      *        claim. Choose a value safely longer than the longest operation plus the longest redelivery/replay
      *        delay; a value below 1 fails when the storage is built. `ttl:` on `#[Idempotent]` overrides it per
      *        operation, and below 1 throws before the effect.
-     * @param bool $cacheResult store the operation result and best-effort replay it on a duplicate
-     *        (default off: a duplicate gets `null`)
+     * @param bool $cacheResult store the operation result — `null` and an {@see \Spiral\Idempotency\Uncacheable}
+     *        value included — and best-effort replay it on a duplicate (default off: a duplicate throws
+     *        {@see \Spiral\Idempotency\Exception\OutcomeUnknownException})
      * @param Guarantee $guarantee declared guarantee (must be backable by the at-most-once driver)
      */
     public function __construct(

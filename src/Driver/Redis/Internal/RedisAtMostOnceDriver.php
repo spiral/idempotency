@@ -8,6 +8,7 @@ use Psr\Log\LoggerInterface;
 use Spiral\Idempotency\Driver\Redis\RedisCommands;
 use Spiral\Idempotency\Exception\IdempotencyException;
 use Spiral\Idempotency\Exception\MisconfigurationException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\ExecuteOptions;
 use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\GuaranteeProvider;
@@ -26,8 +27,9 @@ use Spiral\Serializer\SerializerInterface;
  *      return);
  *   2. on a fresh claim the effect runs fire-and-forget — a crash or a throwable here loses the effect,
  *      the marker persists, so a retry is *refused* (not re-run). The effect therefore runs 0 or 1 times;
- *   3. a duplicate finds the key taken and is refused: it returns `null` (fire-once) or, with
- *      {@see $cacheResult} on, the best-effort cached result.
+ *   3. a duplicate finds the key taken and is refused: with {@see $cacheResult} on it replays the stored
+ *      result (`null` included); otherwise — or when nothing was stored — it throws
+ *      {@see OutcomeUnknownException}.
  *
  * The marker value is `M:<token>`; the optional result cache overwrites it with `R:<serialized result>`
  * after the effect, keeping the remaining TTL. That write is a CAS on the marker: if the key expired
@@ -45,7 +47,8 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
 
     /**
      * Claims the key; replies `{1}` on a fresh claim, otherwise `{0}` — or `{0, <stored value>}` when
-     * ARGV[3] asks for the cached result. In Lua a failed `SET ... NX` is `false`.
+     * ARGV[3] asks for the cached result. In Lua a failed `SET ... NX` is `false`. The script runs with the
+     * clock frozen, so a key the `SET` found cannot expire before the `GET`.
      */
     private const string CLAIM = <<<'LUA'
         if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2]) then return {1} end
@@ -71,7 +74,7 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
      * @param non-empty-string $keyPrefix
      * @param int<1, max> $retentionTtl dedup window (the marker TTL), seconds
      * @param bool $cacheResult best-effort store + replay of the operation result (default off: a
-     *        duplicate gets `null`)
+     *        duplicate gets {@see OutcomeUnknownException})
      */
     public function __construct(
         private RedisCommands $client,
@@ -123,19 +126,19 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
         }
 
         if ($reply[0] === 0) {
-            return $this->replay($reply[1] ?? null);
+            return $this->replay($key, $reply[1] ?? null);
         }
 
         // Marker set. Fire-and-forget: on ANY outcome (success, throwable, crash) it stays until the TTL
         // lapses, so a retry is refused and the effect stays ≤ 1.
         $value = $operation(new AtMostOnceContext($key));
-        // No re-run is possible here, so a transient outcome is final and is replayed like any other;
-        // dropping it would hand a duplicate `null`, which a transport answers as an empty success.
+        // No re-run is possible here, so a transient outcome is final and is stored and replayed like any other.
         if ($value instanceof Uncacheable) {
             $value = $value->value;
         }
 
-        if ($this->cacheResult && $value !== null) {
+        if ($this->cacheResult) {
+            // A `null` result is stored too: a bare marker is reserved for "no outcome stored".
             $this->store($key, $redisKey, $marker, $value, $ttl);
         }
 
@@ -172,7 +175,7 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
         } catch (\Throwable $e) {
             $this->logger?->warning(
                 'Idempotency at-most-once result for key "{key}" was not cached; the effect ran, '
-                . 'a duplicate will get null.',
+                . 'a duplicate will get an unknown outcome.',
                 ['key' => $key, 'exception' => $e],
             );
         }
@@ -197,14 +200,22 @@ final readonly class RedisAtMostOnceDriver implements Idempotency, GuaranteeProv
     }
 
     /**
-     * A duplicate: the effect already ran (or was lost). With the result cache off, "already processed"
-     * is signalled with `null`; with it on, the stored value is the cached result only once the first
-     * caller replaced its marker with it.
+     * A duplicate: the effect already ran (or was lost). Replays the stored result when there is one.
+     *
+     * @param non-empty-string $key
+     * @param mixed $stored the key's value from {@see self::CLAIM}, `null` when the result cache is off
+     * @throws OutcomeUnknownException when the result cache is off, or the first caller has not stored one
+     *         (still running, crashed or threw)
      */
-    private function replay(mixed $stored): mixed
+    private function replay(string $key, mixed $stored): mixed
     {
-        if (!$this->cacheResult || !\is_string($stored) || !\str_starts_with($stored, self::RESULT)) {
-            return null;
+        if (!$this->cacheResult) {
+            throw new OutcomeUnknownException($key, final: true);
+        }
+
+        if (!\is_string($stored) || !\str_starts_with($stored, self::RESULT)) {
+            // Still the `M:` marker: a crashed or failed first run is indistinguishable from one still running.
+            throw new OutcomeUnknownException($key, final: false);
         }
 
         return $this->serializer->unserialize(\substr($stored, \strlen(self::RESULT)));

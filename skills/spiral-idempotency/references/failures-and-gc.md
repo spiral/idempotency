@@ -43,7 +43,8 @@ operation: `#[Idempotent(..., failurePolicy: FailurePolicy::Release)]` or
 Lease/AtLeastOnce storages only. The inbox and at-most-once drivers (SQL and Redis) ignore the policy:
 an inbox failure already rolls the dedup row back together with the side-effect, and a committed record
 of either driver is terminal — releasing it would run the effect twice. An at-most-once operation that
-throws propagates its throwable; the marker stays and every retry is refused with `null`.
+throws propagates its throwable; the marker stays and every retry is refused with
+`OutcomeUnknownException`.
 
 With `Release` there is no cached negative outcome, so nothing below about failure replay applies to
 such an operation.

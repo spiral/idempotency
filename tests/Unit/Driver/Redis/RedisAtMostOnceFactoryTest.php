@@ -13,6 +13,7 @@ use Spiral\Idempotency\Driver\Redis\Internal\RedisConnection;
 use Spiral\Idempotency\Driver\Redis\RedisAtMostOnceConfig;
 use Spiral\Idempotency\Driver\Redis\RedisCommands;
 use Spiral\Idempotency\Exception\MisconfigurationException;
+use Spiral\Idempotency\Exception\OutcomeUnknownException;
 use Spiral\Idempotency\Guarantee;
 use Spiral\Idempotency\GuaranteeProvider;
 use Spiral\Idempotency\IdempotencyRegistry;
@@ -80,7 +81,7 @@ final class RedisAtMostOnceFactoryTest
         Assert::same($redis->store['idempotency-amo:k']['value'], 'R:{"id":42}');
     }
 
-    public function withoutTheResultCacheADuplicateGetsNull(): void
+    public function withoutTheResultCacheADuplicateIsAFinalUnknownOutcome(): void
     {
         $container = new Container();
         $container->bindSingleton(RedisCommands::class, new FakeRedisCommands());
@@ -88,7 +89,12 @@ final class RedisAtMostOnceFactoryTest
         $driver = new RedisAtMostOnceFactory($container)->create(new RedisAtMostOnceConfig(), $this->services());
 
         Assert::same($driver->execute('k', static fn(): string => 'v'), 'v');
-        Assert::null($driver->execute('k', static fn(): string => 'v'));
+        try {
+            $driver->execute('k', static fn(): string => 'v');
+            Assert::fail('a duplicate without the result cache must throw OutcomeUnknownException');
+        } catch (OutcomeUnknownException $e) {
+            Assert::true($e->final);
+        }
     }
 
     public function fallsBackToAPredisClientBinding(): void
