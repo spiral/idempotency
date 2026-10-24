@@ -5,6 +5,9 @@
 
 ### ⚠ BREAKING CHANGES
 
+* **at-most-once:** an AtMostOnce duplicate with no stored outcome throws `OutcomeUnknownException` (with `key` and `final`) from `execute()` instead of returning `null`; over HTTP it is answered with `409 Conflict` (was an empty `200 OK`), over gRPC with `ABORTED` (was an empty OK message).
+* **at-most-once:** a `transports.queue` stack without `QueueRetryMiddleware`, the empty stack included, no longer ACKs an AtMostOnce duplicate: the exception reaches Spiral's retry policy as a failure.
+* **at-most-once:** with `cacheResult` on, a `null` result is stored and replays as `null`; an existing Cycle at-most-once row whose `result` is NULL now answers as an unknown outcome.
 * **at-most-once:** the default classifier treats `LockedException` and a non-final `OutcomeUnknownException` thrown by an operation as Infrastructure (an outer lease releases its key and a retry re-runs), and a final `OutcomeUnknownException` as Domain (the outer lease caches it).
 
 ### Features
