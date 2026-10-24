@@ -32,9 +32,7 @@ use Spiral\Idempotency\Uncacheable;
  *    `409 Conflict` WITHOUT `Retry-After` — nothing tells when, or whether, an outcome gets stored;
  *  - turns a {@see MissingKeyException} into `400 Bad Request` (a missing key is a client error, not a 500);
  *  - wraps a non-cacheable response (default: status >= 500, transient) in {@see Uncacheable}, so the
- *    lease handler releases the key and a retry re-runs instead of replaying the error forever (the
- *    inbox and at-most-once storages never re-run: the inbox, and at-most-once with its result cache,
- *    store and replay it);
+ *    lease handler releases the key and a retry re-runs instead of replaying the error forever;
  *  - with a {@see DomainFailureRenderer} bound, renders a THROWN domain failure into a response
  *    before it is cached, so a replay reproduces the same status (see below).
  *
@@ -118,12 +116,11 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
         try {
             $cached = $next($encoded);
         } catch (LockedException $e) {
-            // Unguarded: after a nested lock a lease key is free and an inbox one rolled back, so "retry
-            // after N" holds; an AtMostOnce key is consumed, and its retry gets the unknown-outcome 409.
+            // Not guarded by $executed: a nested lock leaves this lease key free and an inbox one rolled
+            // back, so "retry after N" still holds.
             return $this->conflict($e->lock, $ownKey);
         } catch (OutcomeUnknownException $e) {
-            // Thrown after the operation ran, it came from a nested idempotent call inside the action —
-            // that call's failure, not a duplicate of this request.
+            // Thrown after the action ran: a nested idempotent call's failure, not a duplicate request.
             return $executed ? throw $e : $this->outcomeUnknown($e->key);
         } catch (MissingKeyException $e) {
             return $this->badRequest($e->getMessage());
@@ -255,9 +252,7 @@ final readonly class HttpOutcomeMiddleware implements ResolutionMiddleware
     }
 
     /**
-     * The duplicate is answered from the record of the first request, hence the replay header. No
-     * `Retry-After`: the first run may still be running, or have crashed or thrown, and nothing tells
-     * when — or whether — an outcome gets stored.
+     * Marked as a replay: the answer comes from the first request's record.
      *
      * @param non-empty-string $key
      */

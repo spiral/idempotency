@@ -287,8 +287,6 @@ final class LeaseIdempotencyTest
 
     public function nestedFinalOutcomeUnknownSettlesTheOuterKey(): void
     {
-        // The inner key will answer the same forever: re-running the outer operation would only repeat
-        // its other effects, so the outer key caches the failure and the retry replays it.
         $driver = $this->driver();
         $options = new ExecuteOptions(failurePolicy: FailurePolicy::Cache);
         $nested = new OutcomeUnknownException('inner', final: true);
@@ -323,8 +321,7 @@ final class LeaseIdempotencyTest
     }
 
     /**
-     * A nested idempotent call's signal under the Cache policy: the outer key must stay free, so the retry
-     * re-runs instead of replaying the inner call's transient state as a cached domain failure.
+     * Under the Cache policy a nested call's transient signal must leave the outer key free: the retry re-runs.
      */
     private function assertNestedSignalFreesTheOuterKey(\Throwable $nested): void
     {

@@ -500,7 +500,6 @@ abstract class CycleStorageTestCase extends DatabaseTestCase
         } catch (\RuntimeException) {
         }
 
-        // Not final: from the row alone the failed first run is indistinguishable from one still running.
         $this->assertOutcomeUnknown($driver, $key, $op, final: false);
         Assert::same($calls, 1);
     }

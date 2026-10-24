@@ -81,7 +81,7 @@ final class NullReplayDriverStub implements Idempotency
 }
 
 /**
- * An AtMostOnce duplicate with no stored outcome: the key is consumed, and there is nothing to replay.
+ * Answers every call as an AtMostOnce duplicate with no stored outcome.
  */
 final class OutcomeUnknownDriverStub implements Idempotency
 {

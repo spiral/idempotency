@@ -52,7 +52,6 @@ final class HttpOutcomeMiddlewareTest
         $response = $this->answer(new OutcomeUnknownException('k', final: true));
 
         Assert::same($response->getStatusCode(), 409);
-        // Unlike a lock, nothing tells when, or whether, an outcome gets stored.
         Assert::false($response->hasHeader('Retry-After'));
         Assert::same($response->getHeaderLine('Idempotency-Key'), 'k');
         Assert::same($response->getHeaderLine('Idempotency-Replay'), 'true');
@@ -66,7 +65,6 @@ final class HttpOutcomeMiddlewareTest
 
     public function outcomeUnknownOfANestedCallPropagates(): void
     {
-        // Raised inside the action by a nested idempotent call: the action ran, this request is no duplicate.
         $nested = new OutcomeUnknownException('inner', final: true);
         $call = new IdempotencyCall(
             context: new \stdClass(),
@@ -87,8 +85,7 @@ final class HttpOutcomeMiddlewareTest
 
     public function nestedLockedIsAConflictUnderTheOwnKey(): void
     {
-        // A nested lock still maps to 409 + Retry-After, but the inner key must not leak into this request's
-        // headers.
+        // The inner key must not leak into this request's headers.
         $locked = new LockedException(new Locked('inner', 7, new \DateTimeImmutable()));
         $call = new IdempotencyCall(
             context: new \stdClass(),

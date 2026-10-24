@@ -51,7 +51,6 @@ final class QueueRetryMiddlewareTest
 
     public function acksOutcomeUnknownDuplicate(): void
     {
-        // An AtMostOnce duplicate must neither fail nor re-enqueue: no throwable reaches the retry policy.
         $middleware = new QueueRetryMiddleware();
 
         $result = $middleware->process($this->call(), static function (IdempotencyCall $call): never {
@@ -63,7 +62,6 @@ final class QueueRetryMiddlewareTest
 
     public function outcomeUnknownOfANestedCallPropagates(): void
     {
-        // Raised inside the handler by a nested idempotent call: the handler ran, this job is no duplicate.
         $middleware = new QueueRetryMiddleware();
         $nested = new OutcomeUnknownException('inner', final: true);
         $call = new IdempotencyCall(

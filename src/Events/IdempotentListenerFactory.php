@@ -47,10 +47,8 @@ use Spiral\Idempotency\KeyResolver;
  *
  * A {@see \Spiral\Idempotency\Exception\LockedException} propagates untouched: the PSR-14 dispatcher
  * stops the fan-out at the first exception, so the surrounding redelivery — the durable producer that
- * dispatched the event — is what retries a concurrent duplicate. An
- * {@see OutcomeUnknownException} (an AtMostOnce duplicate with nothing to replay) skips the listener
- * silently: its key is consumed whether the first run completed, failed or is still running, and a
- * listener returns nothing, so there is no outcome to miss.
+ * dispatched the event — is what retries a concurrent duplicate. An {@see OutcomeUnknownException}
+ * skips the listener silently: its key is consumed either way, and a listener has no outcome to miss.
  *
  * @api
  */
@@ -110,8 +108,7 @@ final readonly class IdempotentListenerFactory implements ListenerFactoryInterfa
                     ),
                 );
             } catch (OutcomeUnknownException $e) {
-                // Thrown after the listener ran, it came from a nested idempotent call inside the listener —
-                // that call's failure, not a duplicate of this delivery.
+                // Thrown after the listener ran: a nested idempotent call's failure, not a duplicate delivery.
                 $executed and throw $e;
             }
         };

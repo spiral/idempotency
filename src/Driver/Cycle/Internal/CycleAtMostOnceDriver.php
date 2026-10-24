@@ -28,7 +28,7 @@ use Spiral\Serializer\SerializerInterface;
  *      persists, so a retry is *refused* (not re-run). The effect therefore runs 0 or 1 times;
  *   3. a duplicate sees the marker and is refused: with {@see $cacheResult} on it replays the stored
  *      result (`null` included); otherwise — or when nothing was stored — it throws
- *      {@see OutcomeUnknownException}, never inventing an outcome.
+ *      {@see OutcomeUnknownException}.
  *
  * This is a dedup-guard, not an idempotency cache: only the effect (≤ 1) is guaranteed. The optional
  * result cache ({@see $cacheResult}) is written *after* the effect, NOT atomically with the marker, so

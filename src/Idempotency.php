@@ -20,10 +20,8 @@ interface Idempotency
      * Run {@see $operation} idempotently under {@see $key}. On replay the cached result is returned
      * instead of executing the operation again.
      *
-     * A replayed `null` is a stored outcome. A duplicate whose first outcome is not available — an
-     * AtMostOnce storage without its result cache, or whose first run has not stored one — throws
-     * {@see Exception\OutcomeUnknownException} instead: the operation is not re-run and no answer is
-     * invented.
+     * A replayed `null` is a stored outcome; an AtMostOnce duplicate with no outcome to replay throws
+     * {@see Exception\OutcomeUnknownException} instead of re-running or inventing an answer.
      *
      * This programmatic path takes the {@see $key} as the final, authoritative key — it is NOT
      * namespaced automatically. Operation-identity namespacing (so the same client key on two endpoints

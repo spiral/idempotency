@@ -38,8 +38,8 @@ use Spiral\RoadRunner\GRPC\StatusCode;
  *    "retry at a higher level", the analog of the HTTP `409 Conflict` — carrying a
  *    {@see RetryInfo} detail with the suggested delay (the analog of `Retry-After`);
  *  - turns an {@see OutcomeUnknownException} (an AtMostOnce duplicate with no stored outcome) into
- *    {@see StatusCode::ABORTED} WITHOUT a {@see RetryInfo} detail, marked as a replay — nothing tells
- *    when, or whether, an outcome gets stored;
+ *    {@see StatusCode::ABORTED} marked as a replay, WITHOUT {@see RetryInfo} — nothing tells when, or
+ *    whether, an outcome gets stored;
  *  - turns a {@see MissingKeyException} into {@see StatusCode::INVALID_ARGUMENT} (a client error, the
  *    analog of HTTP `400 Bad Request`);
  *  - materializes the method's declared response for a `null` outcome (a void operation, replayed or
@@ -61,9 +61,7 @@ use Spiral\RoadRunner\GRPC\StatusCode;
  * service that throws plain domain exceptions instead, bind a {@see DomainFailureMapper}.
  *
  * Transient statuses (see {@see self::TRANSIENT}) are NOT cached: they are wrapped in {@see Uncacheable},
- * so the lease handler releases the key and a retry re-runs, exactly like a 5xx response over HTTP. The
- * inbox and at-most-once storages never re-run: the inbox, and at-most-once with its result cache, store
- * and replay the status.
+ * so the lease handler releases the key and a retry re-runs, exactly like a 5xx response over HTTP.
  *
  * The gRPC server (`Spiral\RoadRunner\GRPC\Server`) catches `GRPCExceptionInterface` and turns its
  * `getCode()` into the wire status, so throwing {@see GRPCException} here is sufficient. Recommended as
@@ -141,8 +139,8 @@ final readonly class GrpcOutcomeMiddleware implements ResolutionMiddleware
         try {
             $cached = $next($encoded);
         } catch (LockedException $e) {
-            // Unguarded: after a nested lock a lease key is free and an inbox one rolled back, so "retry
-            // after N" holds; an AtMostOnce key is consumed, and its retry gets the unknown-outcome ABORTED.
+            // Not guarded by $executed: a nested lock leaves this lease key free and an inbox one rolled
+            // back, so "retry after N" still holds.
             throw new GRPCException(
                 \sprintf(
                     $executed
@@ -155,8 +153,7 @@ final readonly class GrpcOutcomeMiddleware implements ResolutionMiddleware
                 previous: $e,
             );
         } catch (OutcomeUnknownException $e) {
-            // Thrown after the operation ran, it came from a nested idempotent call inside the method —
-            // that call's failure, not a duplicate of this request.
+            // Thrown after the method ran: a nested idempotent call's failure, not a duplicate request.
             $executed and throw $e;
 
             $this->mark($call->context, $e->key, replayed: true);

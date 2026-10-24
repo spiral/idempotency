@@ -5,16 +5,9 @@ declare(strict_types=1);
 namespace Spiral\Idempotency\Exception;
 
 /**
- * A duplicate of an operation that already consumed its key, while no outcome of that first run is
- * stored to replay. An AtMostOnce storage never re-runs, so it has nothing to answer with when its result
- * cache is off, or when the first run has not stored a result: it may still be running, or it crashed
- * or threw before the result write.
- *
- * Distinct from a replayed `null`, which is a real stored outcome. Without the result cache no outcome is
- * ever stored for the key ({@see $final}); with it, a later retry may find one and replay it. The
- * transport middleware maps it to `409 Conflict` without `Retry-After` (HTTP) / `ABORTED` without a retry
- * hint (gRPC) — there is no telling when, or whether, an outcome appears — while the queue ACKs the job
- * and an event listener is skipped.
+ * A duplicate of an operation that already consumed its key, with no outcome of the first run to replay:
+ * an AtMostOnce storage never re-runs, and either keeps no results or the first run has not stored one
+ * (still running, crashed, or threw). Distinct from a replayed `null`, which is a stored outcome.
  *
  * @api
  */
@@ -22,9 +15,8 @@ final class OutcomeUnknownException extends IdempotencyException
 {
     /**
      * @param non-empty-string $key
-     * @param bool $final no outcome will ever be stored for the key (the storage keeps none: an AtMostOnce
-     *        result cache that is off), so every later call answers the same; false when a later call may
-     *        still find one (the cache is on and the first run may not have written its result yet)
+     * @param bool $final true when no outcome will ever be stored for the key (the result cache is off),
+     *        so every later call answers the same; false when a later call may still find one
      */
     public function __construct(
         public readonly string $key,

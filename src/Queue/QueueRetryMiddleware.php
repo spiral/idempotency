@@ -20,8 +20,7 @@ use Spiral\Idempotency\Pipeline\ResolutionMiddleware;
  *  - lets a {@see \Spiral\Idempotency\Exception\MissingKeyException} propagate untouched: a job that can
  *    never resolve a key is not retryable and should dead-letter instead of retrying forever;
  *  - turns an {@see OutcomeUnknownException} (an AtMostOnce duplicate with nothing to replay) into a
- *    `null` result, so the consumer ACKs the job (fire-once semantics) — it never reaches Spiral's retry
- *    policy, which would otherwise fail or re-enqueue a job that must not run again;
+ *    `null` result, so the consumer ACKs the job instead of Spiral's retry policy re-running it;
  *  - passes the handler's return value through untouched.
  *
  * ORDERING: Spiral's default-on `Spiral\Queue\Interceptor\Consume\RetryPolicyInterceptor` must sit
@@ -52,15 +51,11 @@ final readonly class QueueRetryMiddleware implements ResolutionMiddleware
         try {
             return $next($tracked);
         } catch (LockedException $e) {
-            // Someone else holds PROCESSING for this key or for a nested call's — unguarded, because a
-            // nested lock leaves a lease key free (any failure under the queue default Release frees it)
-            // and an inbox one rolled back, so the redelivery re-runs; an AtMostOnce key is consumed, so
-            // the redelivery is ACKed as a duplicate. The native RetryPolicyInterceptor (registered OUTSIDE
-            // this interceptor) catches this and re-queues with the carried delay.
+            // This key, or a nested call's, is held — not guarded by $executed, as a nested lock leaves this
+            // key retryable. The RetryPolicyInterceptor OUTSIDE this one re-queues with the carried delay.
             throw new RetryableLockException($e->lock->retryAfter, $this->maxLockRetries, $e);
         } catch (OutcomeUnknownException $e) {
-            // Thrown after the handler ran, it came from a nested idempotent call inside the handler —
-            // that call's failure, not a duplicate of this job.
+            // Thrown after the handler ran: a nested idempotent call's failure, not a duplicate job.
             return $executed ? throw $e : null;
         }
     }

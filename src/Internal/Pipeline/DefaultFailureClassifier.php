@@ -15,12 +15,10 @@ use Spiral\Queue\Exception\RetryableExceptionInterface;
  * Default, replaceable classifier:
  *
  *   RetryableExceptionInterface        → Infrastructure when `isRetryable()`, Domain otherwise
- *   LockedException                    → Infrastructure (a nested call's transient contention: caching it
- *                                        would outlive the inner lock)
- *   OutcomeUnknownException            → Domain when `$final` (the inner key answers the same on every
- *                                        call, so re-running this operation would only repeat its other
- *                                        effects), Infrastructure otherwise (the inner outcome may still
- *                                        be stored)
+ *   LockedException                    → Infrastructure (a nested call's contention: caching it would
+ *                                        outlive the inner lock)
+ *   OutcomeUnknownException            → Domain when `$final` (a re-run would only repeat the other
+ *                                        effects), Infrastructure otherwise (the outcome may yet be stored)
  *   \Error (and subclasses)            → Infrastructure (retry: a redeploy between attempts may fix it)
  *   \Exception + Retryable    → Infrastructure
  *   \Exception (everything else)       → Domain      ⚠ caches un-tagged infra for the retention TTL

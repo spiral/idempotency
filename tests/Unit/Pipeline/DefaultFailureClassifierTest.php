@@ -41,7 +41,6 @@ final class DefaultFailureClassifierTest
 
     public function finalUnknownOutcomeIsDomain(): void
     {
-        // The inner key answers the same on every call: re-running would only repeat the outer effects.
         $unknown = new OutcomeUnknownException('inner', final: true);
 
         Assert::same((new DefaultFailureClassifier())->classify($unknown), FailureKind::Domain);

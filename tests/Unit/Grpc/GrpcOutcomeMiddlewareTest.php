@@ -295,7 +295,6 @@ final class GrpcOutcomeMiddlewareTest
         Assert::notNull($thrown);
         Assert::same($thrown->getCode(), StatusCode::ABORTED);
         Assert::same($thrown->getPrevious(), $unknown);
-        // No RetryInfo: unlike a lock, nothing tells when, or whether, an outcome gets stored.
         Assert::same($thrown->getDetails(), []);
         Assert::same($headers->get('idempotency-replay'), 'true');
         Assert::same($headers->get('idempotency-key'), 'k');
@@ -303,7 +302,6 @@ final class GrpcOutcomeMiddlewareTest
 
     public function outcomeUnknownOfANestedCallPropagates(): void
     {
-        // Raised inside the method by a nested idempotent call: the method ran, this call is no duplicate.
         $headers = new ResponseHeaders();
         $middleware = new GrpcOutcomeMiddleware();
         $nested = new OutcomeUnknownException('inner', final: true);
